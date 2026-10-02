@@ -1,0 +1,8 @@
+timestamp,question,complexity,score,model,input_tokens,output_tokens,estimated_cost,latency_seconds
+2026-10-02T11:33:45,What is 2 + 2?,LOW,1,local,3,3,0.0,14.833
+2026-10-02T11:35:11,Explain the difference between supervised and unsupervised learning and give an example of each.,LOW,2,local,24,727,0.0,57.322
+2026-10-02T11:38:34,Design an algorithm to find the shortest path in a graph with negative edge weights and explain why Dijkstra's algorithm cannot always be used.,HIGH,5,groq,35,2349,0.0,6.438
+2026-10-02T11:39:45,What is the capital of Japan?,LOW,2,local,7,7,0.0,4.068
+2026-10-02T11:39:53,What is 15 multiplied by 8?,LOW,0,local,6,7,0.0,3.619
+2026-10-02T11:41:11,"Compare merge sort and quicksort in terms of time complexity, space complexity, and practical performance.",LOW,2,local,26,837,0.0,75.642
+2026-10-02T11:41:21,Design a database schema for an online shopping system and explain the relationships between the tables.,HIGH,5,groq,26,3537,0.0,7.117
