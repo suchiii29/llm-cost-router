@@ -48,7 +48,9 @@ CODE_KEYWORDS = [
     "loop",
 ]
 
-# Keywords that indicate a question may require more context
+# Keywords that indicate a question may require more context.
+# NOTE: these are multi-word phrases, so they still need substring
+# matching against question_lower (not the single-word list).
 CONTEXT_KEYWORDS = [
     "dataset",
     "research",
@@ -90,10 +92,14 @@ def calculate_complexity(question):
 
     # ---------------------------------------------------------
     # 2. Reasoning keywords
+    # FIX: match against `words` (the split word list), not
+    # `question_lower` (the raw string). Checking against the raw
+    # string causes false matches when a keyword is a substring of
+    # a longer word — e.g. "api" inside "capital".
     # ---------------------------------------------------------
     reasoning_matches = [
         word for word in REASONING_KEYWORDS
-        if word in question_lower
+        if word in words
     ]
 
     if reasoning_matches:
@@ -104,10 +110,12 @@ def calculate_complexity(question):
 
     # ---------------------------------------------------------
     # 3. Coding / technical keywords
+    # FIX: same word-boundary fix as above. This is the one that
+    # was causing "capital" to falsely match "api".
     # ---------------------------------------------------------
     code_matches = [
         word for word in CODE_KEYWORDS
-        if word in question_lower
+        if word in words
     ]
 
     if code_matches:
@@ -118,6 +126,10 @@ def calculate_complexity(question):
 
     # ---------------------------------------------------------
     # 4. Context-heavy keywords
+    # NOT changed to `words` — CONTEXT_KEYWORDS has multi-word
+    # phrases like "machine learning", which would never match
+    # against a list of single split words. Substring matching is
+    # correct here.
     # ---------------------------------------------------------
     context_matches = [
         word for word in CONTEXT_KEYWORDS
@@ -148,7 +160,7 @@ def calculate_complexity(question):
         reasons.append("mathematical expression")
 
     # ---------------------------------------------------------
-    # 6. Advanced reasoning phrases
+    # 6. Advanced reasoning phrases (multi-word, substring is correct)
     # ---------------------------------------------------------
     advanced_phrases = [
         "step by step",
