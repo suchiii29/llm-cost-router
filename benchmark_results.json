@@ -1,0 +1,23 @@
+{
+  "always_local": {
+    "mode": "always_local",
+    "accuracy": 50.0,
+    "correct": 4,
+    "total": 8,
+    "total_cost": 0.0
+  },
+  "always_strong": {
+    "mode": "always_strong",
+    "accuracy": 62.5,
+    "correct": 5,
+    "total": 8,
+    "total_cost": 0.000636
+  },
+  "router": {
+    "mode": "router",
+    "accuracy": 75.0,
+    "correct": 6,
+    "total": 8,
+    "total_cost": 0.00051
+  }
+}

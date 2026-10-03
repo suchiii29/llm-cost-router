@@ -1,4 +1,5 @@
 from model_adapter import ask_local_model, ask_strong_model
+import re 
 
 
 # Keywords that usually indicate a question needs more reasoning
@@ -8,8 +9,6 @@ REASONING_KEYWORDS = [
     "analyse",
     "compare",
     "difference",
-    "why",
-    "how",
     "design",
     "develop",
     "evaluate",
@@ -183,6 +182,14 @@ def calculate_complexity(question):
         reasons.append(
             "advanced reasoning phrase: " + advanced_matches[0]
         )
+    numbers_found = re.findall(r'\d+', question)
+
+    if len(numbers_found) >= 4:
+        score += 2
+        reasons.append("multiple numeric values (likely multi-step)")
+    elif len(numbers_found) >= 2:
+        score += 1
+        reasons.append("several numeric values")
 
     # ---------------------------------------------------------
     # Final classification
