@@ -1,3 +1,14 @@
 timestamp,question,complexity,score,model,input_tokens,output_tokens,estimated_cost,baseline_cost,saved,latency_seconds
 2026-10-02T21:33:50,what is 328+232347824,LOW,1,local,5,11,0.0,9e-06,9e-06,13.897
 2026-10-02T21:34:27,where is saudi arabi,LOW,0,local,5,33,0.0,2.6e-05,2.6e-05,10.305
+2026-10-03T08:42:52,what is 2+2,LOW,1,local,2,3,0.0,3e-06,3e-06,27.15
+2026-10-03T08:46:35,explain integration,LOW,2,local,4,865,0.0,0.000649,0.000649,216.145
+2026-10-03T08:46:47,What is the capital of France?,LOW,0,local,7,7,0.0,6e-06,6e-06,4.857
+2026-10-03T08:47:17,How many days are there in a week?,LOW,2,local,8,6,0.0,6e-06,6e-06,5.844
+2026-10-03T08:48:15,Who wrote the novel Romeo and Juliet?,LOW,0,local,9,85,0.0,6.5e-05,6.5e-05,28.474
+2026-10-03T08:51:03,A train travels 120 km in 2 hours. It then increases its speed by 25% and travels for another 3 hours. What is the total distance covered by the train?,LOW,2,local,37,326,0.0,0.00025,0.00025,144.134
+2026-10-03T08:51:34,"A company has 10,000 users. Initially, 20% are active. After a new feature is introduced, the number of active users increases by 30%. Then 10% of the new active users stop using the product. How many active users remain?",HIGH,4,groq,55,114,9.4e-05,9.4e-05,0.0,1.712
+2026-10-03T08:52:12,"Explain the difference between supervised learning, unsupervised learning, and reinforcement learning, including how training data and feedback differ in each approach.",HIGH,3,groq,42,1259,0.000951,0.000951,0.0,3.84
+2026-10-03T08:53:28,"You have three boxes labelled Apples, Oranges, and Apples & Oranges, but every label is incorrect. You can pick only one fruit from one box without looking inside. How can you correctly label all three boxes? Explain the reasoning.",HIGH,3,groq,57,556,0.000426,0.000426,0.0,2.69
+2026-10-03T08:53:55,Why does increasing the learning rate sometimes make a machine learning model fail to converge?,HIGH,3,groq,23,2477,0.001861,0.001861,0.0,7.128
+2026-10-03T08:58:05,What is the difference between a list and a tuple in Python?,LOW,2,local,15,525,0.0,0.000396,0.000396,197.05
