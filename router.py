@@ -232,7 +232,7 @@ def route_question(question):
     # ---------------------------------------------------------
     if complexity == "LOW":
 
-        print("Model      : Local Ollama (qwen2.5:3b)")
+        print("Model      : Local Ollama (qwen2.5:1.5b)")
         print("Route      : CHEAP / EASY TIER")
         print("=" * 60)
 

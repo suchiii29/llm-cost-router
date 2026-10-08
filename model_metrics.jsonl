@@ -1,0 +1,2 @@
+{"model": "qwen2.5:1.5b", "provider": "ollama", "latency_seconds": 16.908, "input_tokens": 39, "output_tokens": 12, "estimated_api_cost_usd": 0.0}
+{"model": "openai/gpt-oss-120b", "provider": "groq", "latency_seconds": 0.804, "input_tokens": 80, "output_tokens": 39, "total_tokens": 119, "estimated_api_cost_usd": null}

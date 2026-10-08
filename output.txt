@@ -1,0 +1,15 @@
+Ask me anything: 
+--- Small local model answer ---
+2+2 equals 4.
+
+--- Strong API model (Groq) answer ---
+2 + 2 = 4.
+
+--- Gemini answer ---
+DEBUG — raw Gemini response: {'error': {'code': 403, 'message': 'Your project has been denied access. Please contact support.', 'status': 'PERMISSION_DENIED'}}
+Traceback (most recent call last):
+  File "/home/harshlife/llm-cost-router/llm-cost-router/model_adapter.py", line 57, in <module>
+    print(ask_gemini(question))
+  File "/home/harshlife/llm-cost-router/llm-cost-router/model_adapter.py", line 45, in ask_gemini
+    return data["candidates"][0]["content"]["parts"][0]["text"]
+KeyError: 'candidates'
