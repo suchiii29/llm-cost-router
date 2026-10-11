@@ -1,2 +1,16 @@
+
 .env
+.env.*
+!.env.example
+.venv/
+.venv312/
 venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+answers_cache_groq.json
+labels_groq_*.json
+train_labels_groq.json
+benchmark_results_groq_*.json
+routing_log_groq.csv
+model_metrics_groq.jsonl

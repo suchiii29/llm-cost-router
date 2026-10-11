@@ -1,5 +1,12 @@
-from model_adapter import ask_local_model, ask_strong_model
-import re 
+import re
+
+from model_adapter import (
+    GroqAPIError,
+    GroqConfigurationError,
+    ask_cheap_model,
+    ask_strong_model,
+)
+from model_config import get_model_config
 
 
 # Keywords that usually indicate a question needs more reasoning
@@ -202,67 +209,159 @@ def calculate_complexity(question):
     return complexity, score, reasons
 
 
-def route_question(question):
+def route_question(question, force_model=None, display=True):
     """
     Routes the question to the appropriate model.
 
-    LOW  -> Local Ollama model
+    LOW  -> Cheap Groq model
     HIGH -> Groq strong model
     """
 
+    if force_model not in (None, "local", "groq", "cheap", "strong"):
+        raise ValueError(
+            "force_model must be 'cheap', 'strong', 'local', 'groq', or None"
+        )
+
     complexity, score, reasons = calculate_complexity(question)
+    config = get_model_config()
+    routed_to = "cheap" if complexity == "LOW" else "strong"
+    selected_model = force_model or routed_to
+    if selected_model == "local":
+        selected_model = "cheap"
+    elif selected_model == "groq":
+        selected_model = "strong"
+    fallback = False
+    fallback_reason = None
+    api_attempts = []
 
-    print("\n" + "=" * 60)
-    print("QUERY ROUTING")
-    print("=" * 60)
+    def record_success(response):
+        api_attempts.append({
+            "model_id": response.model_id,
+            "outcome": "success",
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "total_tokens": response.total_tokens,
+            "latency_seconds": response.latency_seconds,
+        })
 
-    print(f"Question   : {question}")
-    print(f"Complexity : {complexity}")
-    print(f"Score      : {score}")
+    def record_failure(model_id, error):
+        api_attempts.append({
+            "model_id": model_id,
+            "outcome": "failure",
+            "error_type": type(error).__name__,
+            "status_code": getattr(error, "status_code", None),
+            "error": str(error),
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "latency_seconds": None,
+        })
 
-    if reasons:
-        print("Reasons    :")
-        for reason in reasons:
-            print(f"  - {reason}")
-    else:
-        print("Reasons    : No strong complexity indicators detected")
+    if display:
+        print("\n" + "=" * 60)
+        print("QUERY ROUTING")
+        print("=" * 60)
+
+        print(f"Question   : {question}")
+        print(f"Complexity : {complexity}")
+        print(f"Score      : {score}")
+
+        if reasons:
+            print("Reasons    :")
+            for reason in reasons:
+                print(f"  - {reason}")
+        else:
+            print("Reasons    : No strong complexity indicators detected")
 
     # ---------------------------------------------------------
     # Route to the appropriate model
     # ---------------------------------------------------------
-    if complexity == "LOW":
+    if force_model and display:
+        print("[MANUAL OVERRIDE]")
 
-        print("Model      : Local Ollama (qwen2.5:1.5b)")
-        print("Route      : CHEAP / EASY TIER")
-        print("=" * 60)
+    if selected_model == "cheap":
+        if display:
+            print(f"Model      : Groq cheap ({config.cheap_model_id})")
+            print("Route      : CHEAP / EASY TIER")
+            print("=" * 60)
 
-        answer = ask_local_model(question)
-
+        try:
+            response = ask_cheap_model(question)
+        except (GroqAPIError, GroqConfigurationError) as error:
+            record_failure(config.cheap_model_id, error)
+            raise
+        record_success(response)
     else:
+        if display:
+            print(f"Model      : Groq strong ({config.strong_model_id})")
+            print("Route      : STRONG / HARD TIER")
+            print("=" * 60)
 
-        print("Model      : Groq (openai/gpt-oss-120b)")
-        print("Route      : STRONG / HARD TIER")
+        try:
+            response = ask_strong_model(question)
+            record_success(response)
+        except GroqConfigurationError as error:
+            record_failure(config.strong_model_id, error)
+            error.api_attempts = list(api_attempts)
+            raise
+        except GroqAPIError as error:
+            record_failure(config.strong_model_id, error)
+            if not error.recoverable:
+                error.api_attempts = list(api_attempts)
+                raise
+
+            fallback_reason = str(error)
+            fallback = True
+            if display:
+                print(
+                    f"[FALLBACK: {fallback_reason}; trying cheap model "
+                    f"{config.cheap_model_id}]"
+                )
+            try:
+                response = ask_cheap_model(question)
+                record_success(response)
+            except (GroqAPIError, GroqConfigurationError) as fallback_error:
+                record_failure(config.cheap_model_id, fallback_error)
+                fallback_error.api_attempts = list(api_attempts)
+                final_error = GroqAPIError(
+                    f"Strong model failed ({fallback_reason}); cheap-model "
+                    f"fallback also failed ({fallback_error})",
+                    status_code=getattr(fallback_error, "status_code", None),
+                    recoverable=False,
+                )
+                final_error.api_attempts = list(api_attempts)
+                raise final_error from fallback_error
+
+    if display:
+        print("\nANSWER")
+        print("-" * 60)
+        print(response.answer)
         print("=" * 60)
 
-        answer = ask_strong_model(question)
-
-    print("\nANSWER")
-    print("-" * 60)
-    print(answer)
-    print("=" * 60)
-
-    return {
+    result = {
         "question": question,
         "complexity": complexity,
         "score": score,
-        "model": (
-            "local"
-            if complexity == "LOW"
-            else "groq"
-        ),
-        "answer": answer,
+        "routed_to": routed_to,
+        "model": response.model_id,
+        "model_tier": "cheap" if fallback else selected_model,
+        "fallback": fallback,
+        "fallback_reason": fallback_reason,
+        "api_attempts": api_attempts,
+        "answer": response.answer,
         "reasons": reasons,
+        "provider_usage": {
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "total_tokens": response.total_tokens,
+        },
+        "latency_seconds": response.latency_seconds,
     }
+
+    if force_model:
+        result["overridden"] = True
+
+    return result
 
 
 def main():
@@ -280,6 +379,20 @@ def main():
     while True:
 
         question = input("\nAsk a question: ").strip()
+        force_model = None
+
+        if question.lower().startswith("force cheap:"):
+            force_model = "cheap"
+            question = question[len("force cheap:"):].strip()
+        elif question.lower().startswith("force strong:"):
+            force_model = "strong"
+            question = question[len("force strong:"):].strip()
+        elif question.lower().startswith("force local:"):
+            force_model = "cheap"
+            question = question[len("force local:"):].strip()
+        elif question.lower().startswith("force groq:"):
+            force_model = "strong"
+            question = question[len("force groq:"):].strip()
 
         if question.lower() == "exit":
             print("\nExiting router.")
@@ -290,7 +403,7 @@ def main():
             continue
 
         try:
-            route_question(question)
+            route_question(question, force_model=force_model)
 
         except Exception as error:
             print("\nERROR:")
