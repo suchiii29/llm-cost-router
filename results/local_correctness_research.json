@@ -1,0 +1,186 @@
+{
+  "artifacts": {
+    "model": "models/local_correctness_tfidf_logreg.joblib"
+  },
+  "cross_validation": {
+    "folds": 5,
+    "majority_class_baseline": {
+      "accuracy": 0.5518394648829431,
+      "class": 0,
+      "confusion_matrix_labels_0_1": [
+        [
+          330,
+          0
+        ],
+        [
+          268,
+          0
+        ]
+      ],
+      "f1": 0.0,
+      "n": 598,
+      "precision": 0.0,
+      "recall": 0.0,
+      "roc_auc": 0.5
+    },
+    "metrics": {
+      "accuracy": 0.8344481605351171,
+      "confusion_matrix_labels_0_1": [
+        [
+          268,
+          62
+        ],
+        [
+          37,
+          231
+        ]
+      ],
+      "f1": 0.8235294117647058,
+      "n": 598,
+      "precision": 0.78839590443686,
+      "recall": 0.8619402985074627,
+      "roc_auc": 0.8946008593396653
+    },
+    "shuffle": true,
+    "strategy": "StratifiedKFold"
+  },
+  "data": {
+    "dev": {
+      "count": 60,
+      "path": "data/dev.jsonl",
+      "sha256": "298404cd89670a181081f5d02db0c642e896428eecf56fd86f5921fd54211fcb"
+    },
+    "dev_cache": {
+      "path": "cache/answers_dev.json",
+      "sha256": "d65e05e6681e0c172d10b5b1105eab42a4d7bd13bcbd56edd1e997c27ed9228e"
+    },
+    "train_labels": {
+      "count": 598,
+      "path": "data/train_labels.jsonl",
+      "sha256": "d1b7910e39abff0676bd0b92beb0a48338f81956a9bc269dedd027f5a7c9da48"
+    }
+  },
+  "dev": {
+    "metrics": {
+      "accuracy": 0.35,
+      "by_task_type": {
+        "math": {
+          "accuracy": 0.35,
+          "confusion_matrix_labels_0_1": [
+            [
+              21,
+              0
+            ],
+            [
+              39,
+              0
+            ]
+          ],
+          "f1": 0.0,
+          "n": 60,
+          "precision": 0.0,
+          "recall": 0.0,
+          "roc_auc": 0.3772893772893774
+        }
+      },
+      "confusion_matrix_labels_0_1": [
+        [
+          21,
+          0
+        ],
+        [
+          39,
+          0
+        ]
+      ],
+      "f1": 0.0,
+      "n": 60,
+      "precision": 0.0,
+      "recall": 0.0,
+      "roc_auc": 0.3772893772893774
+    },
+    "routing_comparison": {
+      "policies": {
+        "always_local": {
+          "accuracy": 0.65,
+          "by_task_type": {
+            "math": {
+              "accuracy": 0.65,
+              "local_calls": 60,
+              "n": 60,
+              "strong_calls": 0
+            }
+          },
+          "correct": 39,
+          "local_call_share": 1.0,
+          "local_calls": 60,
+          "n": 60,
+          "strong_call_share": 0.0,
+          "strong_calls": 0
+        },
+        "always_strong": {
+          "accuracy": 1.0,
+          "by_task_type": {
+            "math": {
+              "accuracy": 1.0,
+              "local_calls": 0,
+              "n": 60,
+              "strong_calls": 60
+            }
+          },
+          "correct": 60,
+          "local_call_share": 0.0,
+          "local_calls": 0,
+          "n": 60,
+          "strong_call_share": 1.0,
+          "strong_calls": 60
+        },
+        "classifier_selective": {
+          "accuracy": 1.0,
+          "by_task_type": {
+            "math": {
+              "accuracy": 1.0,
+              "local_calls": 0,
+              "n": 60,
+              "strong_calls": 60
+            }
+          },
+          "correct": 60,
+          "local_call_share": 0.0,
+          "local_calls": 0,
+          "n": 60,
+          "strong_call_share": 1.0,
+          "strong_calls": 60
+        }
+      },
+      "route_to_strong_when_local_probability_below": 0.5,
+      "threshold": 0.5
+    }
+  },
+  "features": {
+    "class_weight": "balanced",
+    "classifier": "LogisticRegression",
+    "fields": [
+      "question",
+      "task_type"
+    ],
+    "max_iter": 2000,
+    "min_df": 1,
+    "ngram_range": [
+      1,
+      2
+    ],
+    "probability_threshold": 0.5,
+    "solver": "liblinear",
+    "sublinear_tf": true,
+    "vectorizer": "TfidfVectorizer"
+  },
+  "purpose": "question-only prediction of local Qwen checker correctness",
+  "random_seed": 506,
+  "versions": {
+    "joblib": "1.6.0",
+    "numpy": "2.5.4",
+    "python": "3.12.16",
+    "scikit_learn": "1.9.1"
+  }
+}

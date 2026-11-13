@@ -1,0 +1,27 @@
+provider_mode: live
+db_url: sqlite:///router.db
+log_prompts: false
+complexity_threshold: 3
+request_timeout_seconds: 120
+retry_attempts: 3
+api_rate_limit_per_minute: 60
+ollama_base_url: http://localhost:11434
+tiers:
+  - id: 0
+    name: local
+    provider: ollama
+    model_id: qwen2.5:1.5b
+    input_usd_per_million: 0
+    output_usd_per_million: 0
+  - id: 1
+    name: cheap
+    provider: groq
+    model_id: openai/gpt-oss-20b
+    input_usd_per_million:
+    output_usd_per_million:
+  - id: 2
+    name: strong
+    provider: groq
+    model_id: openai/gpt-oss-120b
+    input_usd_per_million:
+    output_usd_per_million:

@@ -1,113 +1,137 @@
-import os
-import json
-import time
-import requests
+"""Compatibility facade over the packaged provider implementations."""
 
+import os
+from dataclasses import dataclass
+from typing import Optional
+
+import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+from app.config import get_settings
+from app.providers.base import (
+    METRICS_FILE,
+    ProviderConfigurationError,
+    ProviderHTTPError,
+    ProviderResponse,
+    ProviderTransportError,
+    record_metrics as _record_metrics,
+)
+from app.providers.groq import API_URL, GroqProvider
+from app.providers.ollama import OllamaProvider
+from model_config import get_model_config
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-METRICS_FILE = "model_metrics.jsonl"
+
+__all__ = [
+    "API_URL",
+    "METRICS_FILE",
+    "GroqAPIError",
+    "GroqConfigurationError",
+    "ModelResponse",
+    "OllamaAPIError",
+    "ask_cheap_model",
+    "ask_groq_model",
+    "ask_ollama_model",
+    "ask_strong_model",
+    "ask_tier",
+    "get_groq_api_key",
+    "get_model_config",
+    "record_metrics",
+    "requests",
+]
 
 
-def record_metrics(metrics):
-    with open(METRICS_FILE, "a") as f:
-        f.write(json.dumps(metrics) + "\n")
+GroqAPIError = ProviderHTTPError
+GroqConfigurationError = ProviderConfigurationError
+OllamaAPIError = ProviderTransportError
 
 
-def ask_local_model(question):
-    """Send a question to Ollama and record performance metrics."""
+@dataclass(frozen=True)
+class ModelResponse:
+    answer: str
+    model_id: str
+    provider: str
+    latency_seconds: float
+    input_tokens: Optional[int]
+    output_tokens: Optional[int]
+    total_tokens: Optional[int]
 
-    url = "http://localhost:11434/api/generate"
 
-    payload = {
-        "model": "qwen2.5:1.5b",
-        "prompt": question,
-        "stream": False
-    }
-
-    start = time.perf_counter()
-
-    response = requests.post(
-        url,
-        json=payload,
-        timeout=300
+def _legacy_response(response: ProviderResponse) -> ModelResponse:
+    return ModelResponse(
+        answer=response.answer,
+        model_id=response.model_id,
+        provider=response.provider,
+        latency_seconds=response.latency_seconds,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        total_tokens=response.total_tokens,
     )
 
-    elapsed = time.perf_counter() - start
-    response.raise_for_status()
 
-    data = response.json()
-    answer = data["response"]
-
-    record_metrics({
-        "model": "qwen2.5:1.5b",
-        "provider": "ollama",
-        "latency_seconds": round(elapsed, 3),
-        "input_tokens": data.get("prompt_eval_count"),
-        "output_tokens": data.get("eval_count"),
-        "estimated_api_cost_usd": 0.0
-    })
-
-    return answer
+def get_groq_api_key() -> str:
+    load_dotenv()
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        raise GroqConfigurationError("GROQ_API_KEY is missing")
+    return key
 
 
-def ask_strong_model(question):
-    """Send a question to Groq and record performance metrics."""
+def record_metrics(response: ModelResponse | ProviderResponse) -> None:
+    if isinstance(response, ModelResponse):
+        from app.providers.base import make_response
+        import time
 
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY is missing from your .env file")
+        converted = make_response(
+            answer=response.answer,
+            question="",
+            model_id=response.model_id,
+            provider=response.provider,
+            started_at=time.perf_counter() - response.latency_seconds,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+        )
+        _record_metrics(converted)
+    else:
+        _record_metrics(response)
 
-    url = "https://api.groq.com/openai/v1/chat/completions"
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+def ask_groq_model(question: str, model_id: str) -> ModelResponse:
+    settings = get_settings()
+    key = get_groq_api_key()
+    provider = GroqProvider(
+        key,
+        timeout=settings.request_timeout_seconds,
+        retry_attempts=settings.retry_attempts,
+    )
+    return _legacy_response(provider.generate(question, model_id))
 
-    payload = {
-        "model": "openai/gpt-oss-120b",
-        "messages": [
-            {"role": "user", "content": question}
-        ]
-    }
 
-    start = time.perf_counter()
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=120
+def ask_ollama_model(
+    question: str,
+    model_id: Optional[str] = None,
+    base_url: Optional[str] = None,
+    timeout: float = 120,
+) -> ModelResponse:
+    settings = get_settings()
+    provider = OllamaProvider(
+        base_url or settings.ollama_base_url,
+        timeout=timeout,
+        retry_attempts=settings.retry_attempts,
+    )
+    return _legacy_response(
+        provider.generate(question, model_id or settings.tier(0).model_id)
     )
 
-    elapsed = time.perf_counter() - start
-    response.raise_for_status()
 
-    data = response.json()
-    answer = data["choices"][0]["message"]["content"]
-
-    usage = data.get("usage", {})
-
-    record_metrics({
-        "model": "openai/gpt-oss-120b",
-        "provider": "groq",
-        "latency_seconds": round(elapsed, 3),
-        "input_tokens": usage.get("prompt_tokens"),
-        "output_tokens": usage.get("completion_tokens"),
-        "total_tokens": usage.get("total_tokens"),
-        "estimated_api_cost_usd": None
-    })
-
-    return answer
+def ask_tier(question: str, tier) -> ModelResponse:
+    if tier.provider == "ollama":
+        return ask_ollama_model(question, tier.model_id)
+    return ask_groq_model(question, tier.model_id)
 
 
-if __name__ == "__main__":
-    question = input("Ask me anything: ")
+def ask_cheap_model(question: str) -> ModelResponse:
+    return ask_groq_model(question, get_settings().tier(1).model_id)
 
-    print("\n--- Local Ollama answer ---")
-    print(ask_local_model(question))
 
-    print("\n--- Strong Groq API answer ---")
-    print(ask_strong_model(question))
+def ask_strong_model(question: str) -> ModelResponse:
+    return ask_groq_model(question, get_settings().tier(2).model_id)

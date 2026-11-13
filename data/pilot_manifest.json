@@ -1,0 +1,401 @@
+{
+  "questions": [
+    {
+      "id": "simple-test-0003",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0053",
+      "task_type": "classify"
+    },
+    {
+      "id": "arc-challenge-test-01168",
+      "task_type": "mcq"
+    },
+    {
+      "id": "gsm8k-test-01040",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0009",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0004",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0024",
+      "task_type": "extract"
+    },
+    {
+      "id": "arc-challenge-test-01075",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0059",
+      "task_type": "classify"
+    },
+    {
+      "id": "simple-test-0083",
+      "task_type": "classify"
+    },
+    {
+      "id": "simple-test-0035",
+      "task_type": "classify"
+    },
+    {
+      "id": "arc-challenge-test-01008",
+      "task_type": "mcq"
+    },
+    {
+      "id": "arc-challenge-test-00946",
+      "task_type": "mcq"
+    },
+    {
+      "id": "arc-challenge-test-00853",
+      "task_type": "mcq"
+    },
+    {
+      "id": "gsm8k-test-00523",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0038",
+      "task_type": "extract"
+    },
+    {
+      "id": "gsm8k-test-00975",
+      "task_type": "math"
+    },
+    {
+      "id": "arc-challenge-test-00697",
+      "task_type": "mcq"
+    },
+    {
+      "id": "gsm8k-test-00266",
+      "task_type": "math"
+    },
+    {
+      "id": "gsm8k-test-00775",
+      "task_type": "math"
+    },
+    {
+      "id": "arc-challenge-test-00627",
+      "task_type": "mcq"
+    },
+    {
+      "id": "arc-challenge-test-00716",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0077",
+      "task_type": "classify"
+    },
+    {
+      "id": "simple-test-0005",
+      "task_type": "classify"
+    },
+    {
+      "id": "arc-challenge-test-01091",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0082",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0099",
+      "task_type": "reformat"
+    },
+    {
+      "id": "gsm8k-test-00968",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0018",
+      "task_type": "extract"
+    },
+    {
+      "id": "gsm8k-test-00633",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0026",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0094",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0000",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0084",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0058",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0064",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0019",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0001",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0042",
+      "task_type": "extract"
+    },
+    {
+      "id": "gsm8k-test-00095",
+      "task_type": "math"
+    },
+    {
+      "id": "arc-challenge-test-00601",
+      "task_type": "mcq"
+    },
+    {
+      "id": "gsm8k-test-01012",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0007",
+      "task_type": "extract"
+    },
+    {
+      "id": "gsm8k-test-00537",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0057",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0014",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0098",
+      "task_type": "extract"
+    },
+    {
+      "id": "gsm8k-test-01058",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0097",
+      "task_type": "extract"
+    },
+    {
+      "id": "gsm8k-test-01172",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0047",
+      "task_type": "classify"
+    },
+    {
+      "id": "arc-challenge-test-00860",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0087",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0031",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0017",
+      "task_type": "classify"
+    },
+    {
+      "id": "simple-test-0044",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0091",
+      "task_type": "extract"
+    },
+    {
+      "id": "arc-challenge-test-00408",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0040",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0015",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0034",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0029",
+      "task_type": "classify"
+    },
+    {
+      "id": "simple-test-0028",
+      "task_type": "reformat"
+    },
+    {
+      "id": "gsm8k-test-00190",
+      "task_type": "math"
+    },
+    {
+      "id": "arc-challenge-test-00685",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0037",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0010",
+      "task_type": "reformat"
+    },
+    {
+      "id": "gsm8k-test-00132",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0075",
+      "task_type": "reformat"
+    },
+    {
+      "id": "arc-challenge-test-00859",
+      "task_type": "mcq"
+    },
+    {
+      "id": "arc-challenge-test-00257",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0088",
+      "task_type": "reformat"
+    },
+    {
+      "id": "gsm8k-test-01183",
+      "task_type": "math"
+    },
+    {
+      "id": "arc-challenge-test-00798",
+      "task_type": "mcq"
+    },
+    {
+      "id": "arc-challenge-test-00775",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0086",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0045",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0089",
+      "task_type": "classify"
+    },
+    {
+      "id": "gsm8k-test-00092",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0011",
+      "task_type": "classify"
+    },
+    {
+      "id": "gsm8k-test-00746",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0071",
+      "task_type": "classify"
+    },
+    {
+      "id": "gsm8k-test-00258",
+      "task_type": "math"
+    },
+    {
+      "id": "simple-test-0041",
+      "task_type": "classify"
+    },
+    {
+      "id": "arc-challenge-test-01050",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0049",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0039",
+      "task_type": "reformat"
+    },
+    {
+      "id": "arc-challenge-test-01171",
+      "task_type": "mcq"
+    },
+    {
+      "id": "simple-test-0076",
+      "task_type": "reformat"
+    },
+    {
+      "id": "simple-test-0050",
+      "task_type": "extract"
+    },
+    {
+      "id": "simple-test-0065",
+      "task_type": "classify"
+    },
+    {
+      "id": "simple-test-0095",
+      "task_type": "classify"
+    },
+    {
+      "id": "simple-test-0023",
+      "task_type": "classify"
+    },
+    {
+      "id": "gsm8k-test-01187",
+      "task_type": "math"
+    },
+    {
+      "id": "arc-challenge-test-00980",
+      "task_type": "mcq"
+    },
+    {
+      "id": "gsm8k-test-00144",
+      "task_type": "math"
+    }
+  ],
+  "sample_size": 96,
+  "schema_version": 1,
+  "seed": 506,
+  "source_test_dataset": "data/test.jsonl",
+  "source_test_sha256": "417e709d72d19f3bb855ef22cb3704bc85b9d16152c091f32ea8e22c80fe9be5",
+  "split": "test",
+  "task_counts": {
+    "classify": 16,
+    "extract": 20,
+    "math": 20,
+    "mcq": 20,
+    "reformat": 20
+  }
+}

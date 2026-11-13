@@ -1,190 +1,252 @@
-import json
-import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import Mock, patch
 
+from app.config import Settings, TierSettings
+from app.storage.db import log_request
 from dashboard_data import (
-    build_dashboard_summary,
-    load_api_metrics,
-    load_routing_history,
-    process_submission,
+    filter_requests,
+    format_cost,
+    load_request_history,
+    request_tier,
+    submit_in_replay_mode,
+    submit_to_api,
+    summarize_requests,
 )
-from model_config import ModelConfig
 
 
-CONFIG = ModelConfig(
-    cheap_model_id="openai/gpt-oss-20b",
-    strong_model_id="openai/gpt-oss-120b",
-    cheap_input_usd_per_million=0.1,
-    cheap_output_usd_per_million=0.2,
-    strong_input_usd_per_million=0.3,
-    strong_output_usd_per_million=0.4,
-)
+def settings_for(database_url: str) -> Settings:
+    return Settings(
+        provider_mode="live",
+        db_url=database_url,
+        log_prompts=False,
+        tiers=[
+            TierSettings(
+                id=0,
+                name="local",
+                provider="ollama",
+                model_id="qwen-local",
+                input_usd_per_million=0,
+                output_usd_per_million=0,
+            ),
+            TierSettings(
+                id=1,
+                name="cheap",
+                provider="groq",
+                model_id="groq-cheap",
+                input_usd_per_million=1,
+                output_usd_per_million=2,
+            ),
+            TierSettings(
+                id=2,
+                name="strong",
+                provider="groq",
+                model_id="groq-strong",
+                input_usd_per_million=3,
+                output_usd_per_million=4,
+            ),
+        ],
+    )
+
+
+def add_request(
+    settings: Settings,
+    *,
+    question: str,
+    tier: int,
+    score: int,
+    latency: int,
+    fallback: bool = False,
+    overridden: bool = False,
+    cost: float | None = 0.0,
+    baseline: float | None = 0.0,
+) -> int:
+    chosen_tier = settings.tier(tier)
+    return log_request(
+        question=question,
+        score=score,
+        reasons=["reasoning keyword"],
+        routed_to="strong" if score >= 3 else "local",
+        model=chosen_tier.model_id,
+        fallback=fallback,
+        fallback_reason="HTTP 503" if fallback else None,
+        overridden=overridden,
+        input_tokens=10,
+        output_tokens=5,
+        token_source="estimated",
+        latency_ms=latency,
+        cost_usd=cost,
+        baseline_cost_usd=baseline,
+        settings=settings,
+    )
 
 
 class DashboardDataTests(unittest.TestCase):
-    def test_missing_logs_load_as_empty_without_network_calls(self):
-        with tempfile.TemporaryDirectory() as directory:
-            csv_path = os.path.join(directory, "missing.csv")
-            metrics_path = os.path.join(directory, "missing.jsonl")
-            self.assertEqual(load_routing_history(csv_path), [])
-            self.assertEqual(load_api_metrics(metrics_path), [])
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        db_path = Path(self.tempdir.name) / "requests.db"
+        self.settings = settings_for(f"sqlite:///{db_path}")
 
-    def test_loads_csv_and_jsonl_metrics(self):
-        with tempfile.TemporaryDirectory() as directory:
-            csv_path = os.path.join(directory, "routing.csv")
-            metrics_path = os.path.join(directory, "metrics.jsonl")
-            with open(csv_path, "w", encoding="utf-8") as file:
-                file.write(
-                    "timestamp,question,complexity,model_tier,model_id,"
-                    "latency_seconds,fallback,provider_input_tokens,"
-                    "provider_output_tokens,estimated_input_tokens,"
-                    "estimated_output_tokens\n"
-                    "2026-01-01T10:00:00,Hello,LOW,cheap,"
-                    "openai/gpt-oss-20b,0.8,False,10,5,10,5\n"
-                )
-            with open(metrics_path, "w", encoding="utf-8") as file:
-                file.write(json.dumps({
-                    "model_id": "openai/gpt-oss-20b",
-                    "latency_seconds": 0.8,
-                }) + "\n")
+    def tearDown(self):
+        self.tempdir.cleanup()
 
-            self.assertEqual(len(load_routing_history(csv_path)), 1)
-            self.assertEqual(len(load_api_metrics(metrics_path)), 1)
+    def test_missing_database_reads_empty_without_creating_it(self):
+        records = load_request_history(self.settings)
+        self.assertEqual(records, [])
+        db_path = Path(self.tempdir.name) / "requests.db"
+        self.assertFalse(db_path.exists())
 
-    @patch("dashboard_data.get_model_config", return_value=CONFIG)
-    def test_summary_uses_current_rates_and_logged_token_usage(self, _config):
-        rows = [{
-            "model_tier": "cheap",
-            "model_id": CONFIG.cheap_model_id,
-            "latency_seconds": "2.0",
-            "provider_input_tokens": "100",
-            "provider_output_tokens": "50",
-        }]
+    def test_reads_request_table_and_decodes_reasons(self):
+        request_id = add_request(
+            self.settings,
+            question="Explain this",
+            tier=1,
+            score=4,
+            latency=250,
+        )
+        rows = load_request_history(self.settings)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["request_id"], request_id)
+        self.assertEqual(rows[0]["reasons"], ["reasoning keyword"])
+        self.assertIsNone(rows[0]["question_text"])
 
-        summary = build_dashboard_summary(rows, [], CONFIG)
-
-        self.assertEqual(summary["total_queries"], 1)
-        self.assertEqual(summary["cheap_calls"], 1)
-        self.assertEqual(summary["strong_calls"], 0)
-        self.assertEqual(summary["average_latency_seconds"], 2.0)
-        self.assertAlmostEqual(summary["estimated_cost_usd"], 0.00002)
-
-    @patch(
-        "dashboard_data.get_model_config",
-        return_value=ModelConfig(
-            cheap_model_id=CONFIG.cheap_model_id,
-            strong_model_id=CONFIG.strong_model_id,
-            cheap_input_usd_per_million=None,
-            cheap_output_usd_per_million=None,
-            strong_input_usd_per_million=None,
-            strong_output_usd_per_million=None,
-        ),
-    )
-    def test_missing_rates_are_not_reported_as_zero_cost(self, _config):
-        rows = [{
-            "model_tier": "cheap",
-            "model_id": CONFIG.cheap_model_id,
-            "provider_input_tokens": "100",
-            "provider_output_tokens": "50",
-            "estimated_input_tokens": "100",
-            "estimated_output_tokens": "50",
-        }]
-
-        summary = build_dashboard_summary(rows, [], None)
-
-        self.assertIsNone(summary["estimated_cost_usd"])
-
-    def test_metrics_can_supply_performance_without_fake_query_history(self):
-        metrics = [
-            {
-                "model_id": CONFIG.cheap_model_id,
-                "latency_seconds": 1.0,
-            },
-            {
-                "model_id": CONFIG.strong_model_id,
-                "latency_seconds": 3.0,
-            },
-        ]
-
-        summary = build_dashboard_summary([], metrics, CONFIG)
-
-        self.assertEqual(summary["total_queries"], 0)
-        self.assertEqual(summary["cheap_calls"], 1)
-        self.assertEqual(summary["strong_calls"], 1)
-        self.assertEqual(summary["average_latency_seconds"], 2.0)
-        self.assertIn("may include fallback retries", summary["performance_source"])
-
-    @patch("dashboard_data.get_model_config", return_value=CONFIG)
-    @patch(
-        "dashboard_data.estimate_cost",
-        return_value={"estimated_cost_usd": None},
-    )
-    def test_submission_calls_tracker_once_and_returns_answer_model_and_fallback(
-        self,
-        _estimate,
-        _config,
-    ):
-        result = {
-            "question": "Explain an algorithm",
-            "answer": "A mocked answer",
-            "model": CONFIG.cheap_model_id,
-            "complexity": "HIGH",
-            "score": 4,
-            "routed_to": "strong",
-            "model_tier": "cheap",
-            "fallback": True,
-            "fallback_reason": "rate limited",
-            "reasons": ["reasoning keyword"],
-            "latency_seconds": 1.2,
-            "provider_usage": {
-                "input_tokens": 10,
-                "output_tokens": 20,
-                "total_tokens": 30,
-            },
-        }
-        tracker = unittest.mock.Mock(return_value=result)
-        state = {}
-
-        displayed = process_submission(
-            state,
-            1,
-            "Explain an algorithm",
-            tracker_function=tracker,
+    def test_summary_shares_fallbacks_cost_and_nearest_rank_latencies(self):
+        add_request(
+            self.settings,
+            question="one",
+            tier=0,
+            score=1,
+            latency=100,
+            cost=0,
+            baseline=0.0001,
+        )
+        add_request(
+            self.settings,
+            question="two",
+            tier=1,
+            score=3,
+            latency=200,
+            fallback=True,
+            cost=0.00002,
+            baseline=0.0001,
+        )
+        add_request(
+            self.settings,
+            question="three",
+            tier=2,
+            score=5,
+            latency=300,
+            overridden=True,
+            cost=0.00003,
+            baseline=0.00003,
+        )
+        add_request(
+            self.settings,
+            question="four",
+            tier=2,
+            score=6,
+            latency=400,
+            cost=0.00004,
+            baseline=0.00004,
         )
 
-        tracker.assert_called_once_with("Explain an algorithm", display=False)
-        self.assertEqual(displayed["answer"], "A mocked answer")
-        self.assertEqual(displayed["model"], CONFIG.cheap_model_id)
-        self.assertTrue(displayed["fallback"])
-        self.assertEqual(displayed["fallback_reason"], "rate limited")
+        summary = summarize_requests(load_request_history(self.settings), self.settings)
+        self.assertEqual(summary["requests"], 4)
+        self.assertEqual(summary["tier_counts"], {0: 1, 1: 1, 2: 2})
+        self.assertEqual(summary["tier_shares"], {0: 0.25, 1: 0.25, 2: 0.5})
+        self.assertEqual(summary["fallbacks"], 1)
+        self.assertEqual(summary["overrides"], 1)
+        self.assertAlmostEqual(summary["estimated_cost_usd"], 0.00009)
+        self.assertAlmostEqual(summary["counterfactual_strong_cost_usd"], 0.00027)
+        self.assertEqual(summary["p50_latency_ms"], 200)
+        self.assertEqual(summary["p95_latency_ms"], 400)
 
-    @patch("dashboard_data.get_model_config", return_value=CONFIG)
-    @patch("dashboard_data.estimate_cost", return_value={"estimated_cost_usd": None})
-    def test_rerun_does_not_submit_same_request_twice(self, _estimate, _config):
-        tracker = unittest.mock.Mock(return_value={
-            "question": "q",
-            "answer": "a",
-            "model": CONFIG.cheap_model_id,
-            "provider_usage": {},
-        })
-        state = {}
+    def test_missing_rates_or_token_costs_are_unavailable(self):
+        add_request(
+            self.settings,
+            question="one",
+            tier=1,
+            score=4,
+            latency=100,
+            cost=None,
+            baseline=None,
+        )
+        summary = summarize_requests(load_request_history(self.settings), self.settings)
+        self.assertIsNone(summary["estimated_cost_usd"])
+        self.assertIsNone(summary["counterfactual_strong_cost_usd"])
+        self.assertEqual(format_cost(None), "Cost unavailable")
+        self.assertIn("(estimated)", format_cost(0.0))
 
-        first = process_submission(state, 1, "q", tracker_function=tracker)
-        duplicate = process_submission(state, 1, "q", tracker_function=tracker)
+    def test_filters_by_tier_fallback_override_and_text(self):
+        add_request(
+            self.settings,
+            question="math reasoning",
+            tier=1,
+            score=4,
+            latency=100,
+            fallback=True,
+            overridden=True,
+        )
+        add_request(
+            self.settings,
+            question="short prompt",
+            tier=0,
+            score=1,
+            latency=50,
+        )
+        rows = load_request_history(self.settings)
+        filters = filter_requests(
+            rows,
+            tier="tier 1 · cheap",
+            fallback="Yes",
+            overridden="Yes",
+            search="reasoning",
+            settings=self.settings,
+        )
+        self.assertEqual(len(filters), 1)
+        self.assertEqual(request_tier(filters[0], self.settings), "tier 1 · cheap")
 
-        self.assertIsNotNone(first)
-        self.assertIsNone(duplicate)
-        tracker.assert_called_once()
+    @patch("dashboard_data.requests.post")
+    def test_api_submission_posts_one_authenticated_request(self, post):
+        response = Mock(status_code=200)
+        response.json.return_value = {"answer": "api answer", "request_id": 7}
+        post.return_value = response
 
-    def test_tracker_error_is_propagated_to_dashboard(self):
-        tracker = unittest.mock.Mock(side_effect=RuntimeError("mock routing failure"))
+        result = submit_to_api(
+            "question",
+            api_url="http://router:8000/",
+            api_key="test-key",
+            force_model="strong",
+            threshold=4,
+        )
 
-        with self.assertRaisesRegex(RuntimeError, "mock routing failure"):
-            process_submission({}, 1, "q", tracker_function=tracker)
+        self.assertEqual(result["request_id"], 7)
+        post.assert_called_once_with(
+            "http://router:8000/v1/route",
+            headers={"X-API-Key": "test-key"},
+            json={
+                "question": "question",
+                "threshold": 4,
+                "force_model": "strong",
+            },
+            timeout=180,
+        )
 
-        tracker.assert_called_once()
+    @patch("dashboard_data.requests.post", side_effect=AssertionError("network used"))
+    def test_replay_mode_uses_fake_provider_and_logs_without_network(self, post):
+        result = submit_in_replay_mode(
+            "question",
+            settings=self.settings,
+            force_model="local",
+            threshold=4,
+        )
+        self.assertIn("deterministic fake", result["answer"])
+        self.assertEqual(result["model"], "qwen-local")
+        self.assertEqual(result["token_source"], "estimated")
+        self.assertTrue(result["overridden"])
+        self.assertEqual(len(load_request_history(self.settings)), 1)
+        post.assert_not_called()
 
 
 if __name__ == "__main__":

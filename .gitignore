@@ -2,10 +2,12 @@
 .env
 .env.*
 !.env.example
+.DS_Store
 .venv/
 .venv312/
 venv/
 __pycache__/
+*.pyc
 *.py[cod]
 .pytest_cache/
 answers_cache_groq.json
@@ -14,3 +16,5 @@ train_labels_groq.json
 benchmark_results_groq_*.json
 routing_log_groq.csv
 model_metrics_groq.jsonl
+router.db
+router.db-*

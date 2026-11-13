@@ -7,6 +7,7 @@ from checker import is_correct
 from model_adapter import (
     GroqAPIError,
     GroqConfigurationError,
+    OllamaAPIError,
     ask_cheap_model,
     ask_strong_model,
 )
@@ -29,20 +30,18 @@ def select_sample_indices(total, sample_size=5):
 
 
 def _model_rates(model_id, config):
-    if model_id == config.cheap_model_id:
-        return (
-            config.cheap_input_usd_per_million,
-            config.cheap_output_usd_per_million,
-        )
-    if model_id == config.strong_model_id:
-        return (
-            config.strong_input_usd_per_million,
-            config.strong_output_usd_per_million,
-        )
+    for tier in config.tiers:
+        if model_id == tier.model_id:
+            return tier.input_usd_per_million, tier.output_usd_per_million
     return None, None
 
 
 def _attempt_cost(attempt, config):
+    if (
+        attempt.get("outcome") == "success"
+        and attempt.get("model_id") == config.ollama_model_id
+    ):
+        return 0.0
     input_tokens = attempt.get("input_tokens")
     output_tokens = attempt.get("output_tokens")
     input_rate, output_rate = _model_rates(attempt.get("model_id"), config)
@@ -97,7 +96,7 @@ def run_mode(questions, mode, config=None):
         question = item["question"]
         correct_answer = item["correct_answer"]
         complexity, score, reasons = calculate_complexity(question)
-        routed_to = "cheap" if complexity == "LOW" else "strong"
+        routed_to = "local" if complexity == "LOW" else "strong"
         started = time.perf_counter()
         answer = None
         attempts = []
@@ -126,7 +125,7 @@ def run_mode(questions, mode, config=None):
                 complexity = result["complexity"]
                 score = result["score"]
                 reasons = result["reasons"]
-        except (GroqAPIError, GroqConfigurationError) as error:
+        except (GroqAPIError, GroqConfigurationError, OllamaAPIError) as error:
             attempts = getattr(error, "api_attempts", attempts)
             if not attempts:
                 attempted_model = (

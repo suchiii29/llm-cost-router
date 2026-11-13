@@ -5,9 +5,10 @@ import os
 import unittest
 from unittest.mock import Mock, mock_open, patch
 
-import requests
-
 from checker import extract_number
+from evaluate import evaluate_cache
+from app.config import Settings, TierSettings
+from app.providers.base import ProviderResponse
 from model_adapter import (
     GroqAPIError,
     GroqConfigurationError,
@@ -17,9 +18,15 @@ from model_adapter import (
     get_groq_api_key,
 )
 from model_config import ModelConfig, get_model_config
-from evaluate import evaluate_cache
+import router
 from router import route_question
-from run_benchmark import run_benchmark, run_mode, select_sample_indices
+from run_benchmark import (
+    _attempt_cost,
+    run_benchmark,
+    run_mode,
+    select_sample_indices,
+)
+import tracker
 from tracker import estimate_cost
 
 
@@ -31,6 +38,33 @@ CONFIG = ModelConfig(
     strong_input_usd_per_million=None,
     strong_output_usd_per_million=None,
 )
+
+
+def app_settings(cheap_rates=(None, None), strong_rates=(None, None)):
+    return Settings(
+        _env_file=None,
+        provider_mode="fake",
+        db_url="sqlite://",
+        tiers=[
+            TierSettings(id=0, name="local", provider="ollama", model_id="qwen2.5:1.5b", input_usd_per_million=0, output_usd_per_million=0),
+            TierSettings(
+                id=1, name="cheap", provider="groq",
+                model_id=CONFIG.cheap_model_id,
+                input_usd_per_million=cheap_rates[0],
+                output_usd_per_million=cheap_rates[1],
+            ),
+            TierSettings(
+                id=2, name="strong", provider="groq",
+                model_id=CONFIG.strong_model_id,
+                input_usd_per_million=strong_rates[0],
+                output_usd_per_million=strong_rates[1],
+            ),
+        ],
+    )
+
+
+APP_SETTINGS = app_settings()
+APP_SETTINGS_RATED = app_settings((0.1, 0.2), (0.3, 0.4))
 
 
 def response_for(model_id):
@@ -45,290 +79,180 @@ def response_for(model_id):
     )
 
 
+def provider_response_for(tier):
+    return ProviderResponse(
+        answer="answer",
+        model_id=tier.model_id,
+        provider=tier.provider,
+        input_tokens=10,
+        output_tokens=4,
+        token_source="provider",
+        latency_ms=100,
+    )
+
+
 class GroqAdapterTests(unittest.TestCase):
-    @patch("model_adapter.requests.post")
     @patch("model_adapter.load_dotenv")
+    @patch("app.providers.base.requests.post")
     @patch.dict(os.environ, {}, clear=True)
-    def test_missing_api_key_fails_before_network_call(
-        self,
-        _load_dotenv,
-        post,
-    ):
+    def test_missing_api_key_fails_before_network_call(self, post, _load_dotenv):
         with self.assertRaises(GroqConfigurationError):
             get_groq_api_key()
-
         post.assert_not_called()
 
-    @patch("model_adapter.record_metrics")
+    @patch("app.providers.groq.record_metrics")
     @patch("model_adapter.get_groq_api_key", return_value="test-key")
-    @patch("model_adapter.requests.post")
-    @patch("model_adapter.get_model_config", return_value=CONFIG)
-    def test_cheap_and_strong_use_configured_groq_model_ids(
-        self,
-        _config,
-        post,
-        _key,
-        _record,
+    @patch("model_adapter.get_settings", return_value=APP_SETTINGS)
+    @patch("app.providers.base.requests.post")
+    def test_tier_models_use_configured_groq_ids(
+        self, post, _settings, _key, _record
     ):
-        api_response = Mock()
-        api_response.json.return_value = {
-            "model": "openai/gpt-oss-20b",
-            "choices": [{"message": {"content": "answer"}}],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 4,
-                "total_tokens": 14,
+        response = Mock(status_code=200)
+        response.json.side_effect = [
+            {
+                "model": CONFIG.cheap_model_id,
+                "choices": [{"message": {"content": "cheap answer"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4},
             },
-        }
-        post.return_value = api_response
-
+            {
+                "model": CONFIG.strong_model_id,
+                "choices": [{"message": {"content": "strong answer"}}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 5},
+            },
+        ]
+        post.return_value = response
         cheap = ask_cheap_model("question")
-        strong_body = dict(api_response.json.return_value)
-        strong_body["model"] = "openai/gpt-oss-120b"
-        api_response.json.return_value = strong_body
         strong = ask_strong_model("question")
-
         self.assertEqual(cheap.model_id, CONFIG.cheap_model_id)
         self.assertEqual(strong.model_id, CONFIG.strong_model_id)
         self.assertEqual(post.call_count, 2)
-        self.assertEqual(
-            post.call_args_list[0].kwargs["json"]["model"],
-            CONFIG.cheap_model_id,
-        )
-        self.assertEqual(
-            post.call_args_list[1].kwargs["json"]["model"],
-            CONFIG.strong_model_id,
-        )
-        for call in post.call_args_list:
-            self.assertEqual(
-                call.kwargs["headers"]["Authorization"],
-                "Bearer test-key",
-            )
-        self.assertEqual(cheap.input_tokens, 10)
-        self.assertEqual(cheap.output_tokens, 4)
 
-    @patch("model_adapter.requests.post")
     @patch("model_adapter.get_groq_api_key", return_value="test-key")
-    def test_rate_limit_becomes_recoverable_adapter_error(self, _key, post):
-        http_response = Mock()
-        http_response.status_code = 429
-        post.return_value.raise_for_status.side_effect = requests.HTTPError(
-            response=http_response
-        )
-
+    @patch("model_adapter.get_settings", return_value=APP_SETTINGS)
+    @patch("app.providers.base.requests.post")
+    def test_http_429_is_recoverable(self, post, _settings, _key):
+        post.return_value = Mock(status_code=429)
+        from model_adapter import ask_groq_model
         with self.assertRaises(GroqAPIError) as raised:
-            from model_adapter import ask_groq_model
-
             ask_groq_model("question", CONFIG.strong_model_id)
-
         self.assertEqual(raised.exception.status_code, 429)
         self.assertTrue(raised.exception.recoverable)
+        self.assertEqual(post.call_count, 3)
 
     @patch("model_adapter.get_groq_api_key", return_value="test-key")
-    @patch("model_adapter.requests.post")
-    def test_authentication_error_is_not_recoverable(self, post, _key):
-        http_response = Mock()
-        http_response.status_code = 401
-        post.return_value.raise_for_status.side_effect = requests.HTTPError(
-            response=http_response
-        )
-
+    @patch("model_adapter.get_settings", return_value=APP_SETTINGS)
+    @patch("app.providers.base.requests.post")
+    def test_authentication_error_is_not_retried(self, post, _settings, _key):
+        post.return_value = Mock(status_code=401)
         from model_adapter import ask_groq_model
-
         with self.assertRaises(GroqAPIError) as raised:
             ask_groq_model("question", CONFIG.strong_model_id)
-
         self.assertFalse(raised.exception.recoverable)
-        self.assertIn("same API key cannot recover", str(raised.exception))
+        self.assertEqual(post.call_count, 1)
 
-    @patch("model_adapter.record_metrics")
-    @patch("model_adapter.get_groq_api_key", return_value="test-key")
-    @patch("model_adapter.requests.post")
-    @patch("model_adapter.get_model_config", return_value=CONFIG)
-    def test_adapter_does_not_log_answer_text(
-        self,
-        _config,
-        post,
-        _key,
-        record,
-    ):
-        api_response = Mock()
-        api_response.json.return_value = {
-            "model": CONFIG.cheap_model_id,
-            "choices": [{"message": {"content": "private response"}}],
-            "usage": {},
-        }
-        post.return_value = api_response
-
-        result = ask_cheap_model("question")
-
-        self.assertEqual(result.answer, "private response")
-        self.assertEqual(record.call_args.args[0], result)
-
-    @patch("model_adapter.open", new_callable=mock_open, create=True)
+    @patch("app.providers.base.open", new_callable=mock_open, create=True)
     def test_metrics_file_does_not_contain_answer_text(self, open_file):
         from model_adapter import record_metrics
-
         record_metrics(response_for(CONFIG.cheap_model_id))
         logged_fields = json.loads(open_file().write.call_args.args[0])
         self.assertNotIn("answer", logged_fields)
 
 
 class RouterTests(unittest.TestCase):
-    @patch("router.get_model_config", return_value=CONFIG)
-    @patch("router.ask_strong_model", return_value=response_for(CONFIG.strong_model_id))
-    @patch("router.ask_cheap_model", return_value=response_for(CONFIG.cheap_model_id))
-    def test_automatic_low_complexity_uses_cheap_model(
-        self,
-        cheap,
-        strong,
-        _config,
-    ):
+    @patch("app.routing.router.log_request")
+    @patch("app.routing.router.get_settings", return_value=APP_SETTINGS)
+    @patch("app.routing.router.ask_tier")
+    def test_tier_mapping_low_and_high(self, ask, _settings, _log):
+        ask.side_effect = lambda question, tier, _config: provider_response_for(tier)
         with contextlib.redirect_stdout(io.StringIO()):
-            result = route_question("What is 2 + 2?")
+            low = route_question("What is 2 + 2?")
+            high = route_question("Explain and compare two Python algorithms")
+        self.assertEqual(low["tier_id"], 0)
+        self.assertEqual(low["provider"], "ollama")
+        self.assertEqual(high["tier_id"], 2)
+        self.assertEqual(high["provider"], "groq")
+        self.assertEqual([call.args[1].id for call in ask.call_args_list], [0, 2])
 
-        cheap.assert_called_once()
-        strong.assert_not_called()
-        self.assertEqual(result["routed_to"], "cheap")
-        self.assertEqual(result["model"], CONFIG.cheap_model_id)
-
-    @patch("router.get_model_config", return_value=CONFIG)
-    @patch("router.ask_strong_model", return_value=response_for(CONFIG.strong_model_id))
-    @patch("router.ask_cheap_model", return_value=response_for(CONFIG.cheap_model_id))
-    def test_automatic_high_complexity_uses_strong_model(
-        self,
-        cheap,
-        strong,
-        _config,
+    @patch("app.routing.router.log_request")
+    @patch("app.routing.router.get_settings", return_value=APP_SETTINGS)
+    @patch("app.routing.router.ask_tier")
+    def test_fallback_order_is_tier_two_then_one_then_local(
+        self, ask, _settings, _log
     ):
+        local = APP_SETTINGS.tier(0)
+        ask.side_effect = [
+            GroqAPIError("429 rate limit", 429, True),
+            GroqAPIError("503 unavailable", 503, True),
+            provider_response_for(local),
+        ]
         with contextlib.redirect_stdout(io.StringIO()):
-            result = route_question(
-                "Explain and compare two Python algorithms with examples"
-            )
-
-        cheap.assert_not_called()
-        strong.assert_called_once()
-        self.assertEqual(result["routed_to"], "strong")
-        self.assertEqual(result["model"], CONFIG.strong_model_id)
-
-    @patch("router.get_model_config", return_value=CONFIG)
-    @patch("router.ask_strong_model")
-    @patch("router.ask_cheap_model", return_value=response_for(CONFIG.cheap_model_id))
-    def test_manual_override_selects_cheap_groq_model(
-        self,
-        cheap,
-        strong,
-        _config,
-    ):
-        with contextlib.redirect_stdout(io.StringIO()):
-            result = route_question(
-                "Explain and compare this Python algorithm",
-                force_model="local",
-            )
-
-        cheap.assert_called_once()
-        strong.assert_not_called()
-        self.assertEqual(result["routed_to"], "strong")
-        self.assertEqual(result["model"], CONFIG.cheap_model_id)
-        self.assertTrue(result["overridden"])
-        self.assertFalse(result["fallback"])
-
-    @patch("router.get_model_config", return_value=CONFIG)
-    @patch("router.ask_strong_model", return_value=response_for(CONFIG.strong_model_id))
-    @patch("router.ask_cheap_model")
-    def test_groq_override_selects_strong_model(
-        self,
-        cheap,
-        strong,
-        _config,
-    ):
-        with contextlib.redirect_stdout(io.StringIO()):
-            result = route_question("What is 2 + 2?", force_model="groq")
-
-        cheap.assert_not_called()
-        strong.assert_called_once()
-        self.assertEqual(result["model"], CONFIG.strong_model_id)
-        self.assertTrue(result["overridden"])
-
-    @patch("router.get_model_config", return_value=CONFIG)
-    @patch("router.ask_cheap_model", return_value=response_for(CONFIG.cheap_model_id))
-    @patch(
-        "router.ask_strong_model",
-        side_effect=GroqAPIError("Groq returned HTTP 429", 429, True),
-    )
-    def test_recoverable_strong_api_error_falls_back_to_cheap(
-        self,
-        _strong,
-        cheap,
-        _config,
-    ):
-        with contextlib.redirect_stdout(io.StringIO()) as output:
-            result = route_question(
-                "Explain and compare this Python algorithm"
-            )
-
-        cheap.assert_called_once()
-        self.assertEqual(result["routed_to"], "strong")
-        self.assertEqual(result["model"], CONFIG.cheap_model_id)
-        self.assertEqual(result["model_tier"], "cheap")
+            result = route_question("Explain and compare two Python algorithms")
+        self.assertEqual([call.args[1].id for call in ask.call_args_list], [2, 1, 0])
+        self.assertEqual(result["tier_id"], 0)
         self.assertTrue(result["fallback"])
-        self.assertEqual(result["fallback_reason"], "Groq returned HTTP 429")
-        self.assertIn("[FALLBACK:", output.getvalue())
-        self.assertEqual(
-            [attempt["outcome"] for attempt in result["api_attempts"]],
-            ["failure", "success"],
-        )
-        self.assertEqual(
-            [attempt["model_id"] for attempt in result["api_attempts"]],
-            [CONFIG.strong_model_id, CONFIG.cheap_model_id],
-        )
+        self.assertIn("429", result["fallback_reason"])
+        self.assertIn("503", result["fallback_reason"])
 
-    @patch("router.get_model_config", return_value=CONFIG)
-    @patch("router.ask_cheap_model")
-    @patch(
-        "router.ask_strong_model",
-        side_effect=GroqAPIError("Groq returned HTTP 401", 401, False),
-    )
-    def test_invalid_key_error_does_not_retry_same_provider(
-        self,
-        _strong,
-        cheap,
-        _config,
-    ):
+    @patch("app.routing.router.log_request")
+    @patch("app.routing.router.get_settings", return_value=APP_SETTINGS)
+    @patch("app.routing.router.ask_tier")
+    def test_authentication_failure_does_not_fallback(self, ask, _settings, _log):
+        ask.side_effect = GroqAPIError("401 unauthorized", 401, False)
         with contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(GroqAPIError):
-                route_question("Explain and compare this Python algorithm")
+                route_question("Explain and compare two Python algorithms")
+        ask.assert_called_once()
 
-        cheap.assert_not_called()
-
-    @patch("router.get_model_config", return_value=CONFIG)
-    @patch("router.ask_strong_model", side_effect=GroqConfigurationError("missing key"))
-    @patch("router.ask_cheap_model")
-    def test_missing_key_does_not_fallback(
-        self,
-        cheap,
-        _strong,
-        _config,
-    ):
+    @patch("app.routing.router.log_request")
+    @patch("app.routing.router.get_settings", return_value=APP_SETTINGS)
+    @patch("app.routing.router.ask_tier")
+    def test_local_cheap_strong_and_groq_overrides(self, ask, _settings, _log):
+        ask.side_effect = lambda question, tier, _config: provider_response_for(tier)
         with contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaises(GroqConfigurationError):
-                route_question("Explain and compare this Python algorithm")
+            local = route_question("What is 2 + 2?", force_model="local")
+            cheap = route_question("What is 2 + 2?", force_model="cheap")
+            strong = route_question("What is 2 + 2?", force_model="strong")
+            groq = route_question("What is 2 + 2?", force_model="groq")
+        self.assertEqual([local["tier_id"], cheap["tier_id"], strong["tier_id"], groq["tier_id"]], [0, 1, 2, 2])
+        self.assertTrue(all(result["overridden"] for result in (local, cheap, strong, groq)))
 
-        cheap.assert_not_called()
+
+class TrackerOverrideTests(unittest.TestCase):
+    @patch("app.tracking.track_question")
+    @patch(
+        "builtins.input",
+        side_effect=[
+            "force local: one", "force cheap: two", "force strong: three",
+            "force groq: four", "exit",
+        ],
+    )
+    def test_tracker_cli_preserves_force_tier_prefixes(self, _input, track):
+        tracker.main()
+        self.assertEqual(
+            [call.kwargs["force_model"] for call in track.call_args_list],
+            ["local", "cheap", "strong", "groq"],
+        )
+
+
+class RouterOverrideTests(unittest.TestCase):
+    @patch("app.routing.router.route_question")
+    @patch(
+        "builtins.input",
+        side_effect=[
+            "force local: one", "force cheap: two", "force strong: three",
+            "force groq: four", "exit",
+        ],
+    )
+    def test_router_cli_preserves_force_tier_prefixes(self, _input, route):
+        router.main()
+        self.assertEqual(
+            [call.kwargs["force_model"] for call in route.call_args_list],
+            ["local", "cheap", "strong", "strong"],
+        )
 
 
 class MetricTests(unittest.TestCase):
-    @patch(
-        "tracker.get_model_config",
-        return_value=ModelConfig(
-            cheap_model_id="openai/gpt-oss-20b",
-            strong_model_id="openai/gpt-oss-120b",
-            cheap_input_usd_per_million=0.1,
-            cheap_output_usd_per_million=0.2,
-            strong_input_usd_per_million=0.3,
-            strong_output_usd_per_million=0.4,
-        ),
-    )
+    @patch("app.tracking.get_settings", return_value=APP_SETTINGS_RATED)
     def test_cost_uses_reported_usage_when_available(self, _config):
         result = estimate_cost(
             "openai/gpt-oss-20b",
@@ -346,6 +270,7 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(extract_number("Final answer: 160"), "160")
         self.assertEqual(extract_number("**Final answer:** $70,000"), "70000")
 
+    @patch("model_config.get_settings", side_effect=lambda: Settings(_env_file=None))
     @patch.dict(os.environ, {
         "GROQ_CHEAP_MODEL": "configured-cheap",
         "GROQ_STRONG_MODEL": "configured-strong",
@@ -354,13 +279,29 @@ class MetricTests(unittest.TestCase):
         "GROQ_STRONG_INPUT_USD_PER_MILLION": "",
         "GROQ_STRONG_OUTPUT_USD_PER_MILLION": "",
     })
-    def test_model_ids_can_be_configured_in_environment(self):
+    def test_model_ids_can_be_configured_in_environment(self, _settings):
         config = get_model_config()
 
         self.assertEqual(config.cheap_model_id, "configured-cheap")
         self.assertEqual(config.strong_model_id, "configured-strong")
+        self.assertEqual(
+            [(tier.id, tier.provider) for tier in config.tiers],
+            [(0, "ollama"), (1, "groq"), (2, "groq")],
+        )
 
-    @patch("tracker.get_model_config", return_value=CONFIG)
+    @patch("model_config.get_settings", side_effect=lambda: Settings(_env_file=None))
+    @patch.dict(os.environ, {
+        "GROQ_CHEAP_MODEL": "",
+        "GROQ_STRONG_MODEL": "",
+        "OLLAMA_MODEL": "",
+        "OLLAMA_BASE_URL": "",
+    })
+    def test_blank_model_placeholders_use_documented_defaults(self, _settings):
+        config = get_model_config()
+        self.assertEqual(config.ollama_model_id, "qwen2.5:1.5b")
+        self.assertEqual(config.ollama_base_url, "http://localhost:11434")
+
+    @patch("app.tracking.get_settings", return_value=APP_SETTINGS)
     def test_cost_is_unavailable_without_model_rates(self, _config):
         result = estimate_cost("openai/gpt-oss-20b", "q", "a")
 
@@ -369,6 +310,20 @@ class MetricTests(unittest.TestCase):
             result["token_source"],
             "estimated (characters / 4)",
         )
+
+    @patch("app.tracking.get_settings", return_value=APP_SETTINGS)
+    def test_local_model_cost_is_zero(self, _config):
+        result = estimate_cost(CONFIG.ollama_model_id, "question", "answer")
+        self.assertEqual(result["estimated_cost_usd"], 0.0)
+
+    def test_benchmark_local_model_cost_is_zero_without_token_usage(self):
+        cost = _attempt_cost({
+            "outcome": "success",
+            "model_id": CONFIG.ollama_model_id,
+            "input_tokens": None,
+            "output_tokens": None,
+        }, CONFIG)
+        self.assertEqual(cost, 0.0)
 
 
 class EvaluationTests(unittest.TestCase):

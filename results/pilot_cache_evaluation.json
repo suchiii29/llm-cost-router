@@ -1,0 +1,303 @@
+{
+  "cost": {
+    "reason": "This offline evaluator does not infer pricing or calculate dollar cost.",
+    "reported": false
+  },
+  "paired_comparisons": {
+    "cheap_vs_strong": {
+      "correctness_contingency": {
+        "both_correct": 81,
+        "both_incorrect": 12,
+        "left_only_correct": 0,
+        "right_only_correct": 3
+      },
+      "left_accuracy_on_pairs": 0.84375,
+      "left_tier": "cheap",
+      "paired_questions": 96,
+      "right_accuracy_on_pairs": 0.875,
+      "right_tier": "strong"
+    },
+    "local_vs_cheap": {
+      "correctness_contingency": {
+        "both_correct": 38,
+        "both_incorrect": 11,
+        "left_only_correct": 4,
+        "right_only_correct": 43
+      },
+      "left_accuracy_on_pairs": 0.4375,
+      "left_tier": "local",
+      "paired_questions": 96,
+      "right_accuracy_on_pairs": 0.84375,
+      "right_tier": "cheap"
+    },
+    "local_vs_strong": {
+      "correctness_contingency": {
+        "both_correct": 38,
+        "both_incorrect": 8,
+        "left_only_correct": 4,
+        "right_only_correct": 46
+      },
+      "left_accuracy_on_pairs": 0.4375,
+      "left_tier": "local",
+      "paired_questions": 96,
+      "right_accuracy_on_pairs": 0.875,
+      "right_tier": "strong"
+    }
+  },
+  "pilot_sample_size": 96,
+  "pilot_seed": 506,
+  "schema_version": 1,
+  "source_test_sha256": "417e709d72d19f3bb855ef22cb3704bc85b9d16152c091f32ea8e22c80fe9be5",
+  "split": "test",
+  "tier_results": {
+    "cheap": {
+      "accuracy": 0.84375,
+      "correct": 81,
+      "failed_answers": 0,
+      "incorrect": 15,
+      "malformed_records": [],
+      "metadata": {
+        "available_records": {
+          "input_tokens": 96,
+          "latency": 96,
+          "model_id": 96,
+          "output_tokens": 96,
+          "provider": 96,
+          "timestamp": 96
+        },
+        "latency_seconds": {
+          "max": 6.831,
+          "mean": 1.8004583333333333,
+          "median": 1.2865,
+          "min": 0.245,
+          "n": 96
+        },
+        "missing_records": {
+          "input_tokens": 0,
+          "latency": 0,
+          "model_id": 0,
+          "output_tokens": 0,
+          "provider": 0,
+          "timestamp": 0
+        },
+        "successful_records": 96
+      },
+      "missing_answers": 0,
+      "per_task": {
+        "classify": {
+          "accuracy": 1.0,
+          "correct": 16,
+          "failed_answers": 0,
+          "incorrect": 0,
+          "missing_answers": 0,
+          "questions": 16,
+          "successful_answers": 16
+        },
+        "extract": {
+          "accuracy": 1.0,
+          "correct": 20,
+          "failed_answers": 0,
+          "incorrect": 0,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "math": {
+          "accuracy": 0.9,
+          "correct": 18,
+          "failed_answers": 0,
+          "incorrect": 2,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "mcq": {
+          "accuracy": 0.95,
+          "correct": 19,
+          "failed_answers": 0,
+          "incorrect": 1,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "reformat": {
+          "accuracy": 0.4,
+          "correct": 8,
+          "failed_answers": 0,
+          "incorrect": 12,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        }
+      },
+      "questions": 96,
+      "successful": 96
+    },
+    "local": {
+      "accuracy": 0.4375,
+      "correct": 42,
+      "failed_answers": 0,
+      "incorrect": 54,
+      "malformed_records": [],
+      "metadata": {
+        "available_records": {
+          "input_tokens": 96,
+          "latency": 96,
+          "model_id": 96,
+          "output_tokens": 96,
+          "provider": 96,
+          "timestamp": 96
+        },
+        "latency_seconds": {
+          "max": 2.046,
+          "mean": 0.15577083333333333,
+          "median": 0.108,
+          "min": 0.074,
+          "n": 96
+        },
+        "missing_records": {
+          "input_tokens": 0,
+          "latency": 0,
+          "model_id": 0,
+          "output_tokens": 0,
+          "provider": 0,
+          "timestamp": 0
+        },
+        "successful_records": 96
+      },
+      "missing_answers": 0,
+      "per_task": {
+        "classify": {
+          "accuracy": 0.4375,
+          "correct": 7,
+          "failed_answers": 0,
+          "incorrect": 9,
+          "missing_answers": 0,
+          "questions": 16,
+          "successful_answers": 16
+        },
+        "extract": {
+          "accuracy": 0.75,
+          "correct": 15,
+          "failed_answers": 0,
+          "incorrect": 5,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "math": {
+          "accuracy": 0.1,
+          "correct": 2,
+          "failed_answers": 0,
+          "incorrect": 18,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "mcq": {
+          "accuracy": 0.7,
+          "correct": 14,
+          "failed_answers": 0,
+          "incorrect": 6,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "reformat": {
+          "accuracy": 0.2,
+          "correct": 4,
+          "failed_answers": 0,
+          "incorrect": 16,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        }
+      },
+      "questions": 96,
+      "successful": 96
+    },
+    "strong": {
+      "accuracy": 0.875,
+      "correct": 84,
+      "failed_answers": 0,
+      "incorrect": 12,
+      "malformed_records": [],
+      "metadata": {
+        "available_records": {
+          "input_tokens": 96,
+          "latency": 96,
+          "model_id": 96,
+          "output_tokens": 96,
+          "provider": 96,
+          "timestamp": 96
+        },
+        "latency_seconds": {
+          "max": 7.56,
+          "mean": 2.0055833333333335,
+          "median": 1.5855000000000001,
+          "min": 0.416,
+          "n": 96
+        },
+        "missing_records": {
+          "input_tokens": 0,
+          "latency": 0,
+          "model_id": 0,
+          "output_tokens": 0,
+          "provider": 0,
+          "timestamp": 0
+        },
+        "successful_records": 96
+      },
+      "missing_answers": 0,
+      "per_task": {
+        "classify": {
+          "accuracy": 1.0,
+          "correct": 16,
+          "failed_answers": 0,
+          "incorrect": 0,
+          "missing_answers": 0,
+          "questions": 16,
+          "successful_answers": 16
+        },
+        "extract": {
+          "accuracy": 1.0,
+          "correct": 20,
+          "failed_answers": 0,
+          "incorrect": 0,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "math": {
+          "accuracy": 1.0,
+          "correct": 20,
+          "failed_answers": 0,
+          "incorrect": 0,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "mcq": {
+          "accuracy": 0.95,
+          "correct": 19,
+          "failed_answers": 0,
+          "incorrect": 1,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        },
+        "reformat": {
+          "accuracy": 0.45,
+          "correct": 9,
+          "failed_answers": 0,
+          "incorrect": 11,
+          "missing_answers": 0,
+          "questions": 20,
+          "successful_answers": 20
+        }
+      },
+      "questions": 96,
+      "successful": 96
+    }
+  }
+}

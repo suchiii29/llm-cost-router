@@ -12,11 +12,11 @@ source .venv/bin/activate
 streamlit run streamlit_app.py
 ```
 
-Opening the page, refreshing it, and navigating the dashboard do not call Groq. A valid `GROQ_API_KEY` in the local `.env` is needed only when submitting a question.
+Opening the page, refreshing it, and navigating the dashboard do not call a model. LOW questions use local Ollama; HIGH questions or fallback attempts use Groq and require a valid `GROQ_API_KEY`.
 
 ### 2. Explain the overview (30–45 seconds)
 
-The overview reads `routing_log_groq.csv` for recorded query count, selected cheap/strong tier, average request latency, and estimated cost. If the log does not exist, recorded queries remain 0. If `model_metrics_groq.jsonl` exists, its successful API calls and latency are shown separately; those records do not contain question text or request IDs and are not user-query counts. Cost remains **Cost unavailable** until valid input and output rates are configured for every model represented in the log.
+The overview reads `routing_log_groq.csv` for recorded query count, selected local/cheap/strong tier, average request latency, and estimated cost. If the log does not exist, recorded queries remain 0. `model_metrics_groq.jsonl` records successful calls with provider names and latency; those records do not contain question text or request IDs and are not user-query counts. Local model cost is zero; Groq cost remains unavailable until valid input and output rates are configured.
 
 Performance charts use routing-history rows where available. If there is no routing CSV but API metrics exist, charts are labeled as successful API calls, not routed queries. Routing history does not attempt to reconstruct questions from API metrics.
 
@@ -28,7 +28,7 @@ Enter:
 What is 2 + 2?
 ```
 
-Click **Ask Router** once. The existing router calculates the score and chooses a model. The dashboard shows the answer, complexity, score, selected model ID, routing reason, latency, provider token usage, cost availability, and fallback status. This is one live request and may use Groq quota. No manual model choice is added to the dashboard.
+Click **Ask Router** once. The existing router calculates the score and chooses a model. The dashboard shows the answer, complexity, score, selected model ID, routing reason, latency, provider token usage, cost and fallback status. A LOW question calls local Ollama; a HIGH question calls Groq and may fall back through Groq tier 1 to local Ollama. No manual model choice is added to the dashboard.
 
 ### 4. Ask a more complex question (45–60 seconds)
 
@@ -46,7 +46,7 @@ Show how each successful dashboard or terminal-tracker query appears in routing 
 
 ### 6. Explain benchmark status (20–30 seconds)
 
-The benchmark panel says **Not yet verified** because current Groq results have not been validated against all 60 benchmark questions. A five-question sample has been measured, but it is not a full benchmark. The dashboard does not present historical local-model results as current Groq results. Do not run `run_cache.py` during this short demo; it can make up to 120 live API calls. `run_benchmark.py` defaults to 15 calls plus up to five fallback calls, so do not run it during the demo unless that usage is approved.
+The benchmark panel says **Not yet verified** because current Groq results have not been validated against all 60 benchmark questions. The five-question sample shown in the README predates the local tier and is not a full benchmark. Do not run `run_cache.py` during this short demo; it can make up to 120 live API calls. `run_benchmark.py` defaults to 15 planned requests plus up to ten fallback attempts, so do not run it during the demo unless that usage is approved.
 
 ## Architecture in brief
 
@@ -60,7 +60,7 @@ tracker.track_question(display=False) -- one call
 router.route_question() -- existing scoring, tier selection and fallback
         |
         v
-model_adapter -> Groq API -> answer and provider token/latency data
+model_adapter -> Ollama or Groq -> answer and provider token/latency data
         |
         +--> tracker writes routing_log_groq.csv
         +--> adapter appends model_metrics_groq.jsonl
@@ -77,19 +77,19 @@ The dashboard does not implement its own routing strategy and does not invoke bo
 No. The page reads saved CSV/JSONL data and configuration. A model request happens only after **Ask Router** is clicked with a non-empty question.
 
 **How does the dashboard choose a model?**
-It delegates to the existing `router.route_question()`, through the existing tracking entry point. The rule-based complexity score below 3 selects cheap; score 3 or more selects strong. Thresholds and keywords were not changed for the dashboard.
+It delegates to the existing `router.route_question()`, through the existing tracking entry point. The rule-based complexity score below 3 selects local tier 0; score 3 or more selects strong tier 2. Tier 1 is the first fallback for tier 2. Thresholds and keywords were not changed for the dashboard.
 
 **Does it send a question twice to track it?**
-No. `tracker.track_question()` routes once and then logs that returned result. It can make a second provider call only when the existing strong-to-cheap fallback behavior is triggered by a recoverable error.
+No. `tracker.track_question()` routes once and then logs that returned result. A recoverable tier 2 failure can make up to two fallback calls (tier 1, then local tier 0).
 
 **Why is cost unavailable?**
-No valid rates are configured in this project state. The dashboard does not substitute zero or invent pricing. When rates are configured, the amount is an estimate based on logged token counts and is not the provider invoice.
+Local Ollama cost is zero. Groq cost is unavailable until valid rates are configured. For Groq calls, the amount is an estimate based on logged token counts and is not the provider invoice.
 
 **Why is the benchmark not verified?**
 The current Groq cache does not yet contain a validated set of pairs for all 60 questions. The old cache belongs to an earlier local-model experiment and is kept separate.
 
 **What if the strong model hits a rate limit?**
-The existing router can retry with the cheap Groq model for recoverable errors such as HTTP 429, HTTP 5xx, timeout, or connection failure. Missing/invalid authentication is not retried with the same credential. The result indicates whether fallback occurred.
+The existing router can retry with a cheaper tier for recoverable errors such as HTTP 429, HTTP 5xx, timeout, or connection failure. Missing/invalid authentication is not retried. The result indicates whether fallback occurred.
 
 ## Keep the demo safe
 

@@ -1,25 +1,27 @@
-import json, os, time
-from model_adapter import ask_local_model, ask_strong_model
+"""Compatibility CLI wrapper for split/tier cache generation."""
 
-CACHE = "answers_cache.json"
-SUFFIX = "\n\nSolve step by step. End your reply with 'Final answer: <number>' and nothing after it."
+from scripts.run_cache import (
+    SPLITS,
+    TIERS,
+    cache_path,
+    cache_status,
+    dataset_path,
+    load_split,
+    main,
+    run_cache,
+)
 
-cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
-questions = json.load(open("benchmark_questions.json"))
+__all__ = [
+    "SPLITS",
+    "TIERS",
+    "cache_path",
+    "cache_status",
+    "dataset_path",
+    "load_split",
+    "run_cache",
+    "main",
+]
 
-for i, item in enumerate(questions):
-    for name, fn in [("local", ask_local_model), ("strong", ask_strong_model)]:
-        key = f"{i}|{name}"
-        if key in cache:
-            continue
-        start = time.time()
-        try:
-            answer = fn(item["question"] + SUFFIX)
-        except Exception as e:
-            print("skipped", key, "-", e)   # e.g. rate limit; just rerun later
-            continue
-        cache[key] = {"answer": answer, "seconds": round(time.time() - start, 2)}
-        json.dump(cache, open(CACHE, "w"), indent=2)
-        print("done", key)
-        if name == "strong":
-            time.sleep(2)   
+
+if __name__ == "__main__":
+    raise SystemExit(main())

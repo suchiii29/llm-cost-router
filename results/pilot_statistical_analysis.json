@@ -1,0 +1,564 @@
+{
+  "analysis_type": "offline descriptive and exact paired analysis",
+  "correctness_pattern_definitions": {
+    "all_three_not_unanimous": "At least one tier's correctness outcome differs from another; with binary outcomes, this means the three are not all identical."
+  },
+  "correctness_pattern_question_ids": {
+    "all_three_not_unanimous": [
+      "simple-test-0003",
+      "gsm8k-test-01040",
+      "simple-test-0009",
+      "simple-test-0004",
+      "arc-challenge-test-01075",
+      "simple-test-0059",
+      "simple-test-0083",
+      "simple-test-0035",
+      "arc-challenge-test-00946",
+      "gsm8k-test-00523",
+      "gsm8k-test-00266",
+      "gsm8k-test-00775",
+      "simple-test-0077",
+      "simple-test-0005",
+      "simple-test-0082",
+      "simple-test-0099",
+      "gsm8k-test-00968",
+      "simple-test-0094",
+      "simple-test-0001",
+      "gsm8k-test-00095",
+      "gsm8k-test-01012",
+      "gsm8k-test-00537",
+      "simple-test-0057",
+      "gsm8k-test-01058",
+      "gsm8k-test-01172",
+      "simple-test-0087",
+      "simple-test-0044",
+      "simple-test-0015",
+      "simple-test-0029",
+      "gsm8k-test-00190",
+      "simple-test-0037",
+      "simple-test-0010",
+      "gsm8k-test-00132",
+      "simple-test-0075",
+      "arc-challenge-test-00859",
+      "gsm8k-test-01183",
+      "arc-challenge-test-00798",
+      "simple-test-0086",
+      "simple-test-0045",
+      "simple-test-0089",
+      "gsm8k-test-00092",
+      "gsm8k-test-00746",
+      "gsm8k-test-00258",
+      "simple-test-0041",
+      "simple-test-0039",
+      "arc-challenge-test-01171",
+      "simple-test-0050",
+      "simple-test-0065",
+      "gsm8k-test-01187",
+      "gsm8k-test-00144"
+    ],
+    "cheap_correct_strong_incorrect": [],
+    "local_correct_both_hosted_incorrect": [
+      "simple-test-0004",
+      "simple-test-0082",
+      "simple-test-0094",
+      "simple-test-0010"
+    ],
+    "strong_correct_cheap_incorrect": [
+      "simple-test-0099",
+      "gsm8k-test-01012",
+      "gsm8k-test-01183"
+    ]
+  },
+  "dollar_cost": {
+    "reason": "No pricing was inferred or applied.",
+    "reported": false
+  },
+  "exact_mcnemar_tests": {
+    "cheap_vs_strong": {
+      "discordant_pairs": 3,
+      "left_only_correct": 0,
+      "paired_n": 96,
+      "right_only_correct": 3,
+      "two_sided_exact_p_value": 0.25
+    },
+    "local_vs_cheap": {
+      "discordant_pairs": 47,
+      "left_only_correct": 4,
+      "paired_n": 96,
+      "right_only_correct": 43,
+      "two_sided_exact_p_value": 2.781192165457469e-09
+    },
+    "local_vs_strong": {
+      "discordant_pairs": 50,
+      "left_only_correct": 4,
+      "paired_n": 96,
+      "right_only_correct": 46,
+      "two_sided_exact_p_value": 4.461782054931973e-10
+    }
+  },
+  "exploratory_weighted_estimates": {
+    "cheap": {
+      "estimated_accuracy": 0.884,
+      "estimated_correct": 265.2,
+      "label": "exploratory task-proportion-weighted estimate; not measured full-test accuracy",
+      "population_task_counts": {
+        "classify": 16,
+        "extract": 51,
+        "math": 100,
+        "mcq": 100,
+        "reformat": 33
+      },
+      "population_total": 300,
+      "task_contributions": {
+        "classify": {
+          "pilot_accuracy": 1.0,
+          "population_questions": 16,
+          "weighted_correct_estimate": 16.0
+        },
+        "extract": {
+          "pilot_accuracy": 1.0,
+          "population_questions": 51,
+          "weighted_correct_estimate": 51.0
+        },
+        "math": {
+          "pilot_accuracy": 0.9,
+          "population_questions": 100,
+          "weighted_correct_estimate": 90.0
+        },
+        "mcq": {
+          "pilot_accuracy": 0.95,
+          "population_questions": 100,
+          "weighted_correct_estimate": 95.0
+        },
+        "reformat": {
+          "pilot_accuracy": 0.4,
+          "population_questions": 33,
+          "weighted_correct_estimate": 13.200000000000001
+        }
+      }
+    },
+    "local": {
+      "estimated_accuracy": 0.4395,
+      "estimated_correct": 131.85,
+      "label": "exploratory task-proportion-weighted estimate; not measured full-test accuracy",
+      "population_task_counts": {
+        "classify": 16,
+        "extract": 51,
+        "math": 100,
+        "mcq": 100,
+        "reformat": 33
+      },
+      "population_total": 300,
+      "task_contributions": {
+        "classify": {
+          "pilot_accuracy": 0.4375,
+          "population_questions": 16,
+          "weighted_correct_estimate": 7.0
+        },
+        "extract": {
+          "pilot_accuracy": 0.75,
+          "population_questions": 51,
+          "weighted_correct_estimate": 38.25
+        },
+        "math": {
+          "pilot_accuracy": 0.1,
+          "population_questions": 100,
+          "weighted_correct_estimate": 10.0
+        },
+        "mcq": {
+          "pilot_accuracy": 0.7,
+          "population_questions": 100,
+          "weighted_correct_estimate": 70.0
+        },
+        "reformat": {
+          "pilot_accuracy": 0.2,
+          "population_questions": 33,
+          "weighted_correct_estimate": 6.6000000000000005
+        }
+      }
+    },
+    "strong": {
+      "estimated_accuracy": 0.9228333333333334,
+      "estimated_correct": 276.85,
+      "label": "exploratory task-proportion-weighted estimate; not measured full-test accuracy",
+      "population_task_counts": {
+        "classify": 16,
+        "extract": 51,
+        "math": 100,
+        "mcq": 100,
+        "reformat": 33
+      },
+      "population_total": 300,
+      "task_contributions": {
+        "classify": {
+          "pilot_accuracy": 1.0,
+          "population_questions": 16,
+          "weighted_correct_estimate": 16.0
+        },
+        "extract": {
+          "pilot_accuracy": 1.0,
+          "population_questions": 51,
+          "weighted_correct_estimate": 51.0
+        },
+        "math": {
+          "pilot_accuracy": 1.0,
+          "population_questions": 100,
+          "weighted_correct_estimate": 100.0
+        },
+        "mcq": {
+          "pilot_accuracy": 0.95,
+          "population_questions": 100,
+          "weighted_correct_estimate": 95.0
+        },
+        "reformat": {
+          "pilot_accuracy": 0.45,
+          "population_questions": 33,
+          "weighted_correct_estimate": 14.85
+        }
+      }
+    }
+  },
+  "latency": {
+    "method": "descriptive only; no latency significance test performed",
+    "missing_valid_latency_records": {
+      "cheap": 0,
+      "strong": 0
+    },
+    "paired_cheap_minus_strong": {
+      "cheap_faster_count": 53,
+      "cheap_minus_strong_seconds": {
+        "max_seconds": 6.152,
+        "mean_seconds": -0.205125,
+        "median_seconds": -0.14750000000000013,
+        "min_seconds": -7.052,
+        "n": 96,
+        "q1_seconds": -1.4765000000000001,
+        "q3_seconds": 0.89
+      },
+      "paired_n": 96,
+      "question_ids": [
+        "arc-challenge-test-00257",
+        "arc-challenge-test-00408",
+        "arc-challenge-test-00601",
+        "arc-challenge-test-00627",
+        "arc-challenge-test-00685",
+        "arc-challenge-test-00697",
+        "arc-challenge-test-00716",
+        "arc-challenge-test-00775",
+        "arc-challenge-test-00798",
+        "arc-challenge-test-00853",
+        "arc-challenge-test-00859",
+        "arc-challenge-test-00860",
+        "arc-challenge-test-00946",
+        "arc-challenge-test-00980",
+        "arc-challenge-test-01008",
+        "arc-challenge-test-01050",
+        "arc-challenge-test-01075",
+        "arc-challenge-test-01091",
+        "arc-challenge-test-01168",
+        "arc-challenge-test-01171",
+        "gsm8k-test-00092",
+        "gsm8k-test-00095",
+        "gsm8k-test-00132",
+        "gsm8k-test-00144",
+        "gsm8k-test-00190",
+        "gsm8k-test-00258",
+        "gsm8k-test-00266",
+        "gsm8k-test-00523",
+        "gsm8k-test-00537",
+        "gsm8k-test-00633",
+        "gsm8k-test-00746",
+        "gsm8k-test-00775",
+        "gsm8k-test-00968",
+        "gsm8k-test-00975",
+        "gsm8k-test-01012",
+        "gsm8k-test-01040",
+        "gsm8k-test-01058",
+        "gsm8k-test-01172",
+        "gsm8k-test-01183",
+        "gsm8k-test-01187",
+        "simple-test-0000",
+        "simple-test-0001",
+        "simple-test-0003",
+        "simple-test-0004",
+        "simple-test-0005",
+        "simple-test-0007",
+        "simple-test-0009",
+        "simple-test-0010",
+        "simple-test-0011",
+        "simple-test-0014",
+        "simple-test-0015",
+        "simple-test-0017",
+        "simple-test-0018",
+        "simple-test-0019",
+        "simple-test-0023",
+        "simple-test-0024",
+        "simple-test-0026",
+        "simple-test-0028",
+        "simple-test-0029",
+        "simple-test-0031",
+        "simple-test-0034",
+        "simple-test-0035",
+        "simple-test-0037",
+        "simple-test-0038",
+        "simple-test-0039",
+        "simple-test-0040",
+        "simple-test-0041",
+        "simple-test-0042",
+        "simple-test-0044",
+        "simple-test-0045",
+        "simple-test-0047",
+        "simple-test-0049",
+        "simple-test-0050",
+        "simple-test-0053",
+        "simple-test-0057",
+        "simple-test-0058",
+        "simple-test-0059",
+        "simple-test-0064",
+        "simple-test-0065",
+        "simple-test-0071",
+        "simple-test-0075",
+        "simple-test-0076",
+        "simple-test-0077",
+        "simple-test-0082",
+        "simple-test-0083",
+        "simple-test-0084",
+        "simple-test-0086",
+        "simple-test-0087",
+        "simple-test-0088",
+        "simple-test-0089",
+        "simple-test-0091",
+        "simple-test-0094",
+        "simple-test-0095",
+        "simple-test-0097",
+        "simple-test-0098",
+        "simple-test-0099"
+      ],
+      "strong_faster_count": 43,
+      "ties": 0
+    },
+    "tiers": {
+      "cheap": {
+        "max_seconds": 6.831,
+        "mean_seconds": 1.8004583333333333,
+        "median_seconds": 1.2865,
+        "min_seconds": 0.245,
+        "n": 96,
+        "q1_seconds": 0.5972500000000001,
+        "q3_seconds": 2.2405
+      },
+      "strong": {
+        "max_seconds": 7.56,
+        "mean_seconds": 2.0055833333333335,
+        "median_seconds": 1.5855000000000001,
+        "min_seconds": 0.416,
+        "n": 96,
+        "q1_seconds": 0.6252500000000001,
+        "q3_seconds": 2.7727500000000003
+      }
+    }
+  },
+  "overall_accuracy": {
+    "cheap": {
+      "accuracy": 0.84375,
+      "confidence_interval_95_wilson": {
+        "lower": 0.7580851332547138,
+        "upper": 0.9029629000931343
+      },
+      "correct": 81,
+      "evaluated": 96,
+      "missing_or_invalid": 0
+    },
+    "local": {
+      "accuracy": 0.4375,
+      "confidence_interval_95_wilson": {
+        "lower": 0.3425682747577502,
+        "upper": 0.5372411737244593
+      },
+      "correct": 42,
+      "evaluated": 96,
+      "missing_or_invalid": 0
+    },
+    "strong": {
+      "accuracy": 0.875,
+      "confidence_interval_95_wilson": {
+        "lower": 0.794115318705986,
+        "upper": 0.9270279904007575
+      },
+      "correct": 84,
+      "evaluated": 96,
+      "missing_or_invalid": 0
+    }
+  },
+  "per_task_accuracy": {
+    "cheap": {
+      "classify": {
+        "accuracy": 1.0,
+        "confidence_interval_95_wilson": {
+          "lower": 0.8063923194655637,
+          "upper": 1.0
+        },
+        "correct": 16,
+        "evaluated": 16,
+        "small_sample_note": "n=16; pilot task sample is small"
+      },
+      "extract": {
+        "accuracy": 1.0,
+        "confidence_interval_95_wilson": {
+          "lower": 0.8388748419471806,
+          "upper": 1.0
+        },
+        "correct": 20,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "math": {
+        "accuracy": 0.9,
+        "confidence_interval_95_wilson": {
+          "lower": 0.6989663547715128,
+          "upper": 0.9721335187862319
+        },
+        "correct": 18,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "mcq": {
+        "accuracy": 0.95,
+        "confidence_interval_95_wilson": {
+          "lower": 0.763868806553258,
+          "upper": 0.9911185511992047
+        },
+        "correct": 19,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "reformat": {
+        "accuracy": 0.4,
+        "confidence_interval_95_wilson": {
+          "lower": 0.21880653237281705,
+          "upper": 0.6134184992377469
+        },
+        "correct": 8,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      }
+    },
+    "local": {
+      "classify": {
+        "accuracy": 0.4375,
+        "confidence_interval_95_wilson": {
+          "lower": 0.23098652405492354,
+          "upper": 0.6682144360118811
+        },
+        "correct": 7,
+        "evaluated": 16,
+        "small_sample_note": "n=16; pilot task sample is small"
+      },
+      "extract": {
+        "accuracy": 0.75,
+        "confidence_interval_95_wilson": {
+          "lower": 0.531299122381256,
+          "upper": 0.8881382985923343
+        },
+        "correct": 15,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "math": {
+        "accuracy": 0.1,
+        "confidence_interval_95_wilson": {
+          "lower": 0.027866481213768224,
+          "upper": 0.3010336452284873
+        },
+        "correct": 2,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "mcq": {
+        "accuracy": 0.7,
+        "confidence_interval_95_wilson": {
+          "lower": 0.4810271816464765,
+          "upper": 0.8545227551323956
+        },
+        "correct": 14,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "reformat": {
+        "accuracy": 0.2,
+        "confidence_interval_95_wilson": {
+          "lower": 0.08065766257979806,
+          "upper": 0.41601743225189364
+        },
+        "correct": 4,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      }
+    },
+    "strong": {
+      "classify": {
+        "accuracy": 1.0,
+        "confidence_interval_95_wilson": {
+          "lower": 0.8063923194655637,
+          "upper": 1.0
+        },
+        "correct": 16,
+        "evaluated": 16,
+        "small_sample_note": "n=16; pilot task sample is small"
+      },
+      "extract": {
+        "accuracy": 1.0,
+        "confidence_interval_95_wilson": {
+          "lower": 0.8388748419471806,
+          "upper": 1.0
+        },
+        "correct": 20,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "math": {
+        "accuracy": 1.0,
+        "confidence_interval_95_wilson": {
+          "lower": 0.8388748419471806,
+          "upper": 1.0
+        },
+        "correct": 20,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "mcq": {
+        "accuracy": 0.95,
+        "confidence_interval_95_wilson": {
+          "lower": 0.763868806553258,
+          "upper": 0.9911185511992047
+        },
+        "correct": 19,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      },
+      "reformat": {
+        "accuracy": 0.45,
+        "confidence_interval_95_wilson": {
+          "lower": 0.2581978582556243,
+          "upper": 0.6579146575496577
+        },
+        "correct": 9,
+        "evaluated": 20,
+        "small_sample_note": "n=20; pilot task sample is small"
+      }
+    }
+  },
+  "research_interpretation": {
+    "classifier": "The existing question-only classifier has not demonstrated robust, calibrated, prospective routing performance across the observed distribution mismatch; it is not suitable for live routing.",
+    "larger_experiment": "A larger preregistered, task- and source-stratified paired evaluation, with provenance-aligned training and validation and a routing policy fixed before evaluation, would provide stronger evidence.",
+    "supports": "On this fixed 96-question pilot, cached hosted answers were more often checker-correct than local answers; cheap and strong were close in observed accuracy.",
+    "uncertain": "Small task strata and one pilot sample limit precision and generalization. Latency summaries are descriptive only. The task-weighted estimate is exploratory, not measured full-test accuracy."
+  },
+  "schema_version": 1,
+  "source": {
+    "evaluation_summary": "docs/PILOT_CACHE_EVALUATION.md",
+    "manifest": "data/pilot_manifest.json",
+    "pilot_questions": 96,
+    "source_test_sha256": "417e709d72d19f3bb855ef22cb3704bc85b9d16152c091f32ea8e22c80fe9be5"
+  }
+}

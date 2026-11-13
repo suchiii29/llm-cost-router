@@ -1,0 +1,36 @@
+{
+  "seed": 506,
+  "files": {
+    "train_pool.jsonl": {
+      "item_count": 598,
+      "sha256": "58fa9fcd30103bea175c5953fa4274964114feea6c4dea2ecbd9182c803d2ff8"
+    },
+    "dev.jsonl": {
+      "item_count": 60,
+      "sha256": "298404cd89670a181081f5d02db0c642e896428eecf56fd86f5921fd54211fcb"
+    },
+    "test.jsonl": {
+      "item_count": 300,
+      "sha256": "417e709d72d19f3bb855ef22cb3704bc85b9d16152c091f32ea8e22c80fe9be5"
+    }
+  },
+  "metadata": {
+    "sources": {
+      "GSM8K": "openai/gsm8k configuration main",
+      "ARC-Challenge": "allenai/ai2_arc configuration ARC-Challenge",
+      "dev": "benchmark_questions.json"
+    },
+    "composition": {
+      "train_pool": {
+        "gsm8k_train": 200,
+        "arc_challenge_train": 200,
+        "synthetic_simple": 198
+      },
+      "test": {
+        "gsm8k_test": 100,
+        "arc_challenge_test_mcq": 100,
+        "synthetic_simple": 100
+      }
+    }
+  }
+}
