@@ -12,9 +12,14 @@ from dashboard_data import (
     api_url_from_env,
     filter_requests,
     format_cost,
+    load_api_config,
+    load_api_request_history,
     load_request_history,
+    merge_request_histories,
+    missing_cost_rate_settings,
     request_tier,
     served_tier_label,
+    settings_with_api_tiers,
     submit_in_replay_mode,
     submit_to_api,
     summarize_requests,
@@ -47,7 +52,11 @@ def _display_row(row: dict[str, Any], settings) -> dict[str, Any]:
     created = row.get("created_at")
     return {
         "Request": row.get("request_id"),
-        "Created": created.isoformat(timespec="seconds") if created else "",
+        "Created": (
+            created.isoformat(timespec="seconds")
+            if hasattr(created, "isoformat")
+            else str(created or "").replace("T", " ")[:19]
+        ),
         "Tier": request_tier(row, settings),
         "Routed to": row.get("routed_to"),
         "Model": row.get("model"),
@@ -96,42 +105,94 @@ def _detail_panel(row: dict[str, Any], *, title: str = "Request details") -> Non
 
 
 st.title("LLM Cost Router")
-st.caption("Request history is read from SQLite. Page loads and filters do not call a model.")
+st.caption(
+    "Live history uses the authenticated router API when configured; local Replay "
+    "history uses SQLite. Page loads and filters do not call a model."
+)
 
 settings = get_settings()
+history_error = None
+history_available = True
+api_key = os.getenv("ROUTER_API_KEY", "")
 try:
-    rows = load_request_history(settings)
-except (OSError, ValueError) as error:
-    st.error(f"Could not read request history: {error}")
+    if api_key or os.getenv("API_URL"):
+        if not api_key:
+            raise ValueError(
+                "Set ROUTER_API_KEY to load authenticated backend request history"
+            )
+        backend_config = load_api_config(api_url=api_url_from_env(), api_key=api_key)
+        settings = settings_with_api_tiers(settings, backend_config)
+        backend_rows = load_api_request_history(
+            api_url=api_url_from_env(), api_key=api_key
+        )
+        try:
+            replay_rows = load_request_history(settings)
+        except (OSError, RuntimeError, ValueError):
+            replay_rows = []
+            st.warning("Could not read local Replay history from SQLite.")
+        rows = merge_request_histories(backend_rows, replay_rows)
+    else:
+        rows = load_request_history(settings)
+except (OSError, RuntimeError, ValueError) as error:
+    history_available = False
+    history_error = str(error)
+    st.error(f"Request history and analytics are unavailable: {history_error}")
     rows = []
-summary = summarize_requests(rows, settings)
+summary = summarize_requests(rows, settings) if history_available else None
 
 st.header("Overview")
 cards = st.columns(6)
-cards[0].metric("Requests", summary["requests"])
+cards[0].metric("Requests", summary["requests"] if summary else "Unavailable")
 for column, tier in zip(cards[1:4], settings.tiers):
-    share = summary["tier_shares"].get(tier.id, 0.0)
-    count = summary["tier_counts"].get(tier.id, 0)
-    column.metric(f"Tier {tier.id} share", f"{share:.0%}", delta=f"{count} requests")
-cards[4].metric("Fallbacks", summary["fallbacks"])
-cards[5].metric("Overrides", summary["overrides"])
+    if summary:
+        share = summary["tier_shares"].get(tier.id, 0.0)
+        count = summary["tier_counts"].get(tier.id, 0)
+        column.metric(f"Tier {tier.id} share", f"{share:.0%}", delta=f"{count} requests")
+    else:
+        column.metric(f"Tier {tier.id} share", "Unavailable")
+cards[4].metric("Fallbacks", summary["fallbacks"] if summary else "Unavailable")
+cards[5].metric("Overrides", summary["overrides"] if summary else "Unavailable")
 
 cost_cards = st.columns(4)
-cost_cards[0].metric("Estimated cost", format_cost(summary["estimated_cost_usd"]))
+cost_cards[0].metric(
+    "Estimated cost",
+    format_cost(summary["estimated_cost_usd"]) if summary else "Unavailable",
+)
 cost_cards[1].metric(
     "Counterfactual strong-only cost",
-    format_cost(summary["counterfactual_strong_cost_usd"]),
+    format_cost(summary["counterfactual_strong_cost_usd"])
+    if summary else "Unavailable",
 )
 for column, key, label in (
     (cost_cards[2], "p50_latency_ms", "p50 latency"),
     (cost_cards[3], "p95_latency_ms", "p95 latency"),
 ):
-    value = summary[key]
+    value = summary[key] if summary else None
     column.metric(label, f"{value:.0f} ms" if value is not None else "Unavailable")
-st.caption(
-    "Costs are estimates from configured rates and recorded token counts. "
-    "Requests with unset rates or missing token counts show Cost unavailable."
-)
+if summary and rows and (
+    summary["estimated_cost_usd"] is None
+    or summary["counterfactual_strong_cost_usd"] is None
+):
+    missing_rates = missing_cost_rate_settings(settings)
+    if missing_rates:
+        st.info(
+            "Some stored costs are unavailable. Configure these backend rates "
+            "(USD per 1 million tokens) for new requests: "
+            + ", ".join(f"`{name}`" for name in missing_rates)
+            + ". Historical requests with missing rates remain unavailable."
+        )
+    elif any(
+        row.get("input_tokens") is None or row.get("output_tokens") is None
+        for row in rows
+    ):
+        st.info("Some stored costs are unavailable because token counts are missing.")
+    else:
+        st.info("Some historical requests were recorded without cost estimates.")
+else:
+    st.caption(
+        "Costs are estimates from backend configured rates and recorded token counts. "
+        "Counterfactual strong-only cost uses each request's same token counts."
+    )
 
 st.header("Ask a question")
 replay_mode = st.toggle(
@@ -239,4 +300,7 @@ if visible_rows:
         )
         _detail_panel(selected)
 else:
-    st.info("No requests match these filters yet.")
+    if history_error:
+        st.warning("Request history could not be loaded, so filters were not applied.")
+    else:
+        st.info("No requests match these filters yet.")

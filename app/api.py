@@ -178,7 +178,7 @@ def route_api(body: RouteRequest, settings: Settings = Depends(get_settings)):
 
 @app.get("/v1/requests", dependencies=[Depends(require_api_key)])
 def request_history(
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     settings: Settings = Depends(get_settings),
 ):
@@ -206,6 +206,18 @@ def request_history(
                 "reasons": json.loads(record.reasons_json),
                 "routed_to": record.routed_to,
                 "model": record.model,
+                "tier_id": next(
+                    (tier.id for tier in settings.tiers if tier.model_id == record.model),
+                    None,
+                ),
+                "model_tier": next(
+                    (tier.name for tier in settings.tiers if tier.model_id == record.model),
+                    None,
+                ),
+                "provider": next(
+                    (tier.provider for tier in settings.tiers if tier.model_id == record.model),
+                    None,
+                ),
                 "fallback": record.fallback,
                 "fallback_reason": record.fallback_reason,
                 "overridden": record.overridden,
@@ -226,7 +238,19 @@ def request_history(
 
 @app.get("/v1/config", dependencies=[Depends(require_api_key)])
 def public_config(settings: Settings = Depends(get_settings)):
-    return {"tiers": [{"id": tier.id} for tier in settings.tiers]}
+    return {
+        "tiers": [
+            {
+                "id": tier.id,
+                "name": tier.name,
+                "provider": tier.provider,
+                "model_id": tier.model_id,
+                "input_usd_per_million": tier.input_usd_per_million,
+                "output_usd_per_million": tier.output_usd_per_million,
+            }
+            for tier in settings.tiers
+        ]
+    }
 
 
 @app.get("/health")

@@ -52,6 +52,7 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/v1/route", json={"question": "hello"})
         self.assertEqual(response.status_code, 401)
         self.assertEqual(set(response.json()), {"error"})
+        self.assertEqual(self.client.get("/v1/requests").status_code, 401)
         self.assertEqual(
             self.client.get("/v1/config", headers={"X-API-Key": "wrong"}).status_code,
             401,
@@ -220,7 +221,11 @@ class ApiTests(unittest.TestCase):
 
     def test_config_only_returns_tier_ids_and_history_reads_logged_rows(self):
         config = self.client.get("/v1/config", headers=self.auth_headers())
-        self.assertEqual(config.json(), {"tiers": [{"id": 0}, {"id": 1}, {"id": 2}]})
+        self.assertEqual(
+            [tier["id"] for tier in config.json()["tiers"]], [0, 1, 2]
+        )
+        self.assertEqual(config.json()["tiers"][1]["model_id"], "small")
+        self.assertIn("input_usd_per_million", config.json()["tiers"][1])
         routed = self.client.post(
             "/v1/route", headers=self.auth_headers(), json={"question": "hello"}
         )
@@ -229,6 +234,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(history.json()["items"]), 1)
         self.assertEqual(history.json()["items"][0]["request_id"], routed.json()["request_id"])
         self.assertIsNone(history.json()["items"][0]["question_text"])
+        self.assertEqual(history.json()["items"][0]["tier_id"], 0)
+        self.assertEqual(history.json()["items"][0]["model_tier"], "local")
+        self.assertEqual(history.json()["items"][0]["provider"], "ollama")
 
 
 if __name__ == "__main__":

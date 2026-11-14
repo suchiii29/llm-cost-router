@@ -1,16 +1,24 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings, TierSettings
 from app.storage.db import log_request
 from dashboard_data import (
     filter_requests,
     format_cost,
+    load_api_config,
+    load_api_request_history,
     load_request_history,
+    merge_request_histories,
+    missing_cost_rate_settings,
     request_tier,
     served_tier_label,
+    settings_with_api_tiers,
     submit_in_replay_mode,
     submit_to_api,
     summarize_requests,
@@ -170,6 +178,86 @@ class DashboardDataTests(unittest.TestCase):
         self.assertAlmostEqual(summary["counterfactual_strong_cost_usd"], 0.00027)
         self.assertEqual(summary["p50_latency_ms"], 200)
         self.assertEqual(summary["p95_latency_ms"], 400)
+
+    def test_remote_config_and_history_use_authenticated_backend_endpoints(self):
+        config_response = Mock(status_code=200)
+        config_response.json.return_value = {
+            "tiers": [
+                {
+                    "id": tier.id,
+                    "name": tier.name,
+                    "provider": tier.provider,
+                    "model_id": tier.model_id,
+                    "input_usd_per_million": tier.input_usd_per_million,
+                    "output_usd_per_million": tier.output_usd_per_million,
+                }
+                for tier in self.settings.tiers
+            ]
+        }
+        history_response = Mock(status_code=200)
+        history_response.json.side_effect = [
+            {"items": [{"request_id": 4, "model": "groq-strong"}]},
+            {"items": []},
+        ]
+        with patch(
+            "dashboard_data.requests.get",
+            side_effect=[config_response, history_response, history_response],
+        ) as get:
+            config = load_api_config(api_url="https://backend", api_key="router-key")
+            backend_settings = settings_with_api_tiers(self.settings, config)
+            rows = load_api_request_history(
+                api_url="https://backend", api_key="router-key", page_size=1
+            )
+
+        self.assertEqual(backend_settings.tier(2).model_id, "groq-strong")
+        self.assertEqual(backend_settings.tier(1).input_usd_per_million, 1)
+        self.assertEqual(rows, [{"request_id": 4, "model": "groq-strong"}])
+        self.assertEqual(get.call_count, 3)
+        for call in get.call_args_list:
+            self.assertEqual(call.kwargs["headers"], {"X-API-Key": "router-key"})
+
+    @patch("dashboard_data.requests.get")
+    def test_backend_history_errors_are_not_reported_as_empty(self, get):
+        get.return_value = Mock(status_code=401)
+        with self.assertRaisesRegex(RuntimeError, "HTTP 401"):
+            load_api_request_history(api_url="https://backend", api_key="wrong")
+
+    @patch("dashboard_data.get_engine", side_effect=SQLAlchemyError("database detail"))
+    def test_local_database_errors_have_safe_dashboard_message(self, _get_engine):
+        settings = self.settings.model_copy(update={"db_url": "sqlite://"})
+        with self.assertRaisesRegex(RuntimeError, "Could not read dashboard request history"):
+            load_request_history(settings)
+
+    def test_merging_backend_and_replay_rows_deduplicates_shared_database_entries(self):
+        backend_row = {
+            "request_id": 1,
+            "created_at": "2026-11-14T12:00:00+00:00",
+            "question_hash": "hash",
+            "model": "groq-strong",
+            "score": 4,
+        }
+        local_row = {
+            **backend_row,
+            "created_at": datetime.fromisoformat(backend_row["created_at"]),
+        }
+        rows = merge_request_histories([backend_row], [local_row])
+        self.assertEqual(len(rows), 1)
+
+    def test_missing_cost_rates_name_backend_environment_variables(self):
+        settings = settings_for("sqlite://")
+        settings.tiers[1] = settings.tier(1).model_copy(
+            update={"input_usd_per_million": None}
+        )
+        settings.tiers[2] = settings.tier(2).model_copy(
+            update={"output_usd_per_million": None}
+        )
+        self.assertEqual(
+            missing_cost_rate_settings(settings),
+            [
+                "GROQ_CHEAP_INPUT_USD_PER_MILLION",
+                "GROQ_STRONG_OUTPUT_USD_PER_MILLION",
+            ],
+        )
 
     def test_missing_rates_or_token_costs_are_unavailable(self):
         add_request(

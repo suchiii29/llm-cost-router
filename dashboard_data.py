@@ -3,15 +3,17 @@
 import json
 import math
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import requests
 from sqlalchemy import inspect, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from app.config import Settings, get_settings
+from app.config import Settings, TierSettings, get_settings
 from app.routing.router import route_question
 from app.storage.db import RequestRecord, get_engine
 
@@ -58,18 +60,145 @@ def load_request_history(
         if not database_path.exists():
             return []
 
-    engine = get_engine(settings.db_url)
-    with engine.connect() as connection:
-        if not inspect(connection).has_table(RequestRecord.__tablename__):
-            return []
-    statement = (
-        select(RequestRecord)
-        .order_by(RequestRecord.created_at.desc(), RequestRecord.id.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    with Session(engine) as session:
-        return [_row_dict(row) for row in session.scalars(statement).all()]
+    try:
+        engine = get_engine(settings.db_url)
+        with engine.connect() as connection:
+            if not inspect(connection).has_table(RequestRecord.__tablename__):
+                return []
+        statement = (
+            select(RequestRecord)
+            .order_by(RequestRecord.created_at.desc(), RequestRecord.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        with Session(engine) as session:
+            return [_row_dict(row) for row in session.scalars(statement).all()]
+    except SQLAlchemyError as error:
+        raise RuntimeError("Could not read dashboard request history from SQLite") from error
+
+
+def load_api_config(
+    *, api_url: str, api_key: str, timeout: float = 15
+) -> dict[str, Any]:
+    """Read backend tier and rate configuration without contacting a provider."""
+    if not api_key:
+        raise ValueError("Set ROUTER_API_KEY to read backend request history")
+    try:
+        response = requests.get(
+            f"{api_url.rstrip('/')}/v1/config",
+            headers={"X-API-Key": api_key},
+            timeout=timeout,
+        )
+    except requests.RequestException as error:
+        raise RuntimeError("Could not reach the router API configuration endpoint") from error
+    if response.status_code >= 400:
+        raise RuntimeError(f"Router API configuration returned HTTP {response.status_code}")
+    try:
+        payload = response.json()
+    except (ValueError, requests.exceptions.JSONDecodeError) as error:
+        raise ValueError("Router API returned invalid configuration JSON") from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("tiers"), list):
+        raise ValueError("Router API returned invalid tier configuration")
+    return payload
+
+
+def settings_with_api_tiers(
+    settings: Settings, api_config: dict[str, Any]
+) -> Settings:
+    """Use backend tier IDs/models/rates for interpreting its persisted history."""
+    remote_tiers = api_config.get("tiers")
+    if not isinstance(remote_tiers, list):
+        raise ValueError("Router API returned invalid tier configuration")
+    try:
+        tiers = [TierSettings.model_validate(item) for item in remote_tiers]
+    except (TypeError, ValueError) as error:
+        raise ValueError("Router API returned invalid tier configuration") from error
+    if sorted(tier.id for tier in tiers) != [0, 1, 2]:
+        raise ValueError("Router API returned an incomplete tier configuration")
+    return settings.model_copy(update={"tiers": tiers})
+
+
+def load_api_request_history(
+    *, api_url: str, api_key: str, limit: int = 1000, page_size: int = 1000,
+    timeout: float = 15,
+) -> list[dict[str, Any]]:
+    """Retrieve persisted backend rows using the authenticated, paginated API."""
+    if not api_key:
+        raise ValueError("Set ROUTER_API_KEY to read backend request history")
+    if limit < 1 or page_size < 1:
+        raise ValueError("History limit and page size must be positive")
+    items: list[dict[str, Any]] = []
+    for offset in range(0, limit, page_size):
+        page_limit = min(page_size, limit - offset)
+        try:
+            response = requests.get(
+                f"{api_url.rstrip('/')}/v1/requests",
+                headers={"X-API-Key": api_key},
+                params={"limit": page_limit, "offset": offset},
+                timeout=timeout,
+            )
+        except requests.RequestException as error:
+            raise RuntimeError("Could not reach the router API request history") from error
+        if response.status_code >= 400:
+            raise RuntimeError(f"Router API history returned HTTP {response.status_code}")
+        try:
+            payload = response.json()
+        except (ValueError, requests.exceptions.JSONDecodeError) as error:
+            raise ValueError("Router API returned invalid history JSON") from error
+        page = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+            raise ValueError("Router API returned invalid request history")
+        items.extend(page)
+        if len(page) < page_limit:
+            break
+    return items
+
+
+def merge_request_histories(
+    *histories: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Combine backend live rows and local replay rows without double counting."""
+    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for history in histories:
+        for row in history:
+            created_at = row.get("created_at")
+            if isinstance(created_at, datetime):
+                created_at = created_at.isoformat()
+            identity = (
+                row.get("request_id"), created_at, row.get("question_hash"),
+                row.get("model"), row.get("score"),
+            )
+            merged.setdefault(identity, row)
+
+    def sort_key(row: dict[str, Any]) -> str:
+        value = row.get("created_at")
+        return value.isoformat() if isinstance(value, datetime) else str(value or "")
+
+    return sorted(merged.values(), key=sort_key, reverse=True)
+
+
+def missing_cost_rate_settings(settings: Settings) -> list[str]:
+    """Return backend environment variable names for unset Groq token rates."""
+    variables = {
+        1: (
+            "GROQ_CHEAP_INPUT_USD_PER_MILLION",
+            "GROQ_CHEAP_OUTPUT_USD_PER_MILLION",
+        ),
+        2: (
+            "GROQ_STRONG_INPUT_USD_PER_MILLION",
+            "GROQ_STRONG_OUTPUT_USD_PER_MILLION",
+        ),
+    }
+    missing = []
+    for tier_id, field_names in (
+        (1, ("input_usd_per_million", "output_usd_per_million")),
+        (2, ("input_usd_per_million", "output_usd_per_million")),
+    ):
+        tier = settings.tier(tier_id)
+        for field_name, env_name in zip(field_names, variables[tier_id]):
+            if getattr(tier, field_name) is None:
+                missing.append(env_name)
+    return missing
 
 
 def request_tier(row: dict[str, Any], settings: Optional[Settings] = None) -> str:

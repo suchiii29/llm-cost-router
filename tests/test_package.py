@@ -129,6 +129,15 @@ class CostAndStorageTests(unittest.TestCase):
         self.assertEqual(estimate.baseline_cost_usd, 0.00007)
         self.assertIn("counterfactual", estimate.baseline_label)
 
+    def test_cost_and_counterfactual_use_same_provider_token_counts(self):
+        settings = sample_settings()
+        settings.tiers[1] = settings.tier(1).model_copy(
+            update={"input_usd_per_million": 2, "output_usd_per_million": 5}
+        )
+        estimate = estimate_request_cost(settings, 1, 20, 10)
+        self.assertAlmostEqual(estimate.cost_usd, 0.00009)
+        self.assertAlmostEqual(estimate.baseline_cost_usd, 0.00007)
+
     def test_local_cost_is_zero_even_when_local_rates_are_unset(self):
         settings = sample_settings()
         settings.tiers[0] = settings.tier(0).model_copy(

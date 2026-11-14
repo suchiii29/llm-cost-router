@@ -109,7 +109,7 @@ Install the pinned dependencies, set a non-empty `ROUTER_API_KEY` in `.env`, the
 uvicorn app.api:app --reload
 ```
 
-All routes except `/health` require the same key in the `X-API-Key` header. `POST /v1/route` accepts a question (1–4000 characters), an optional `force_model` (`local`, `cheap`, or `strong`), and an optional threshold. `GET /v1/requests` reads request history from SQLite; `GET /v1/config` returns configured tier IDs only. A per-key in-memory limit defaults to 60 requests per minute and can be changed with `API_RATE_LIMIT_PER_MINUTE`. `/health` checks Ollama HTTP reachability and whether a Groq key is configured; it does not call a model.
+All routes except `/health` require the same key in the `X-API-Key` header. `POST /v1/route` accepts a question (1–4000 characters), an optional `force_model` (`local`, `cheap`, or `strong`), and an optional threshold. `GET /v1/requests` reads request history from SQLite; `GET /v1/config` returns configured tier models and token rates. A per-key in-memory limit defaults to 60 requests per minute and can be changed with `API_RATE_LIMIT_PER_MINUTE`. `/health` checks Ollama HTTP reachability and whether a Groq key is configured; it does not call a model.
 
 `ROUTER_ENABLED_TIERS` is a comma-separated list of tier IDs and defaults to `0,1,2` for local development. For a cloud service without access to local Ollama, set it to `1,2`; low-complexity Automatic requests then use Cheap, and Strong failures can fall back to Cheap. Set `ROUTER_DEPLOYMENT_PROFILE` to `local` or `cloud` for health diagnostics. The profile is informational; `ROUTER_ENABLED_TIERS` controls routing.
 
