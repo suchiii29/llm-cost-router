@@ -1,4 +1,5 @@
 import time
+import logging
 from typing import Optional
 
 from app.config import Settings, get_settings
@@ -16,6 +17,21 @@ OVERRIDE_TIERS = {
     "strong": 2,
     "groq": 2,
 }
+logger = logging.getLogger(__name__)
+
+
+class RoutingConfigurationError(ValueError):
+    """The requested tier is disabled by deployment configuration."""
+
+
+def _automatic_tier(score: int, threshold: int, settings: Settings) -> int:
+    enabled = sorted(settings.enabled_tiers)
+    preferred = choose_tier(score, threshold)
+    if preferred in enabled:
+        return preferred
+    if preferred == 0:
+        return min(enabled)
+    return max(enabled)
 
 
 def ask_tier(question: str, tier, settings: Settings) -> ProviderResponse:
@@ -71,11 +87,28 @@ def route_question(
     active_threshold = (
         settings.complexity_threshold if threshold is None else threshold
     )
-    automatic_tier_id = choose_tier(score, active_threshold)
+    automatic_tier_id = _automatic_tier(score, active_threshold, settings)
     selected_tier_id = (
         automatic_tier_id if force_model is None else OVERRIDE_TIERS[force_model]
     )
-    candidate_ids = list(range(selected_tier_id, -1, -1))
+    if selected_tier_id not in settings.enabled_tiers:
+        tier_name = settings.tier(selected_tier_id).name
+        raise RoutingConfigurationError(
+            f"The {tier_name} tier is disabled in this deployment. "
+            "Choose Automatic, Cheap, or Strong, or enable tier "
+            f"{selected_tier_id} with ROUTER_ENABLED_TIERS."
+        )
+    if selected_tier_id == 0:
+        # A local outage may escalate to a configured cloud provider.
+        candidate_ids = [
+            tier_id for tier_id in sorted(settings.enabled_tiers)
+            if tier_id >= selected_tier_id
+        ]
+    else:
+        candidate_ids = [
+            tier_id for tier_id in sorted(settings.enabled_tiers, reverse=True)
+            if tier_id <= selected_tier_id
+        ]
     attempts = []
     fallback_reasons = []
     started_at = time.perf_counter()
@@ -103,6 +136,11 @@ def route_question(
             attempts.append(_attempt_success(tier_id, response))
             break
         except ProviderError as error:
+            logger.warning(
+                "Provider attempt failed: tier=%s provider=%s model=%s error_type=%s status_code=%s",
+                tier_id, tier.provider, tier.model_id, type(error).__name__,
+                getattr(error, "status_code", None),
+            )
             last_error = error
             attempts.append(
                 _attempt_failure(tier_id, tier.model_id, tier.provider, error)

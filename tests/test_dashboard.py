@@ -10,6 +10,7 @@ from dashboard_data import (
     format_cost,
     load_request_history,
     request_tier,
+    served_tier_label,
     submit_in_replay_mode,
     submit_to_api,
     summarize_requests,
@@ -90,6 +91,14 @@ class DashboardDataTests(unittest.TestCase):
 
     def tearDown(self):
         self.tempdir.cleanup()
+
+    def test_served_tier_is_unavailable_when_either_field_is_missing(self):
+        self.assertEqual(
+            served_tier_label({"tier_id": 2, "model_tier": "strong"}),
+            "tier 2 · strong",
+        )
+        self.assertEqual(served_tier_label({"model_tier": "strong"}), "Unavailable")
+        self.assertEqual(served_tier_label({"tier_id": 2}), "Unavailable")
 
     def test_missing_database_reads_empty_without_creating_it(self):
         records = load_request_history(self.settings)
@@ -232,6 +241,19 @@ class DashboardDataTests(unittest.TestCase):
             },
             timeout=180,
         )
+
+    @patch("dashboard_data.requests.post")
+    def test_api_submission_shows_safe_backend_error_message(self, post):
+        response = Mock(status_code=503)
+        response.json.return_value = {
+            "error": {"code": "provider_error", "message": "Check provider configuration."}
+        }
+        post.return_value = response
+        with self.assertRaisesRegex(RuntimeError, "Check provider configuration"):
+            submit_to_api(
+                "question", api_url="http://router", api_key="test-key",
+                force_model=None, threshold=3,
+            )
 
     @patch("dashboard_data.requests.post", side_effect=AssertionError("network used"))
     def test_replay_mode_uses_fake_provider_and_logs_without_network(self, post):

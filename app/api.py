@@ -5,6 +5,7 @@ from datetime import datetime
 import hashlib
 import hmac
 import json
+import logging
 import math
 import threading
 import time
@@ -19,8 +20,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.providers.base import ProviderError
-from app.routing.router import route_question
+from app.providers.base import (
+    ProviderConfigurationError,
+    ProviderError,
+    ProviderTransportError,
+)
+from app.routing.router import RoutingConfigurationError, route_question
 from app.storage.db import RequestRecord, get_engine, initialize_database
 
 
@@ -31,6 +36,7 @@ class RouteRequest(BaseModel):
 
 
 app = FastAPI(title="LLM Cost Router API", version="1.0.0")
+logger = logging.getLogger(__name__)
 _RATE_WINDOW_SECONDS = 60.0
 _rate_lock = threading.Lock()
 _rate_events: dict[str, deque[float]] = defaultdict(deque)
@@ -67,12 +73,37 @@ async def http_error_handler(_request: Request, exc: HTTPException):
 
 
 @app.exception_handler(ProviderError)
-async def provider_error_handler(_request: Request, _exc: ProviderError):
-    return _error(503, "provider_error", "The request could not be completed")
+async def provider_error_handler(_request: Request, exc: ProviderError):
+    logger.warning(
+        "Provider request failed: error_type=%s status_code=%s",
+        type(exc).__name__, getattr(exc, "status_code", None),
+    )
+    status = getattr(exc, "status_code", None)
+    if status in (401, 403):
+        message = "The provider rejected its credentials; check the configured provider key."
+    elif status == 404:
+        message = "The configured provider model was not found; check the model ID."
+    elif status == 429:
+        message = "The provider rate limit or quota was reached; retry later."
+    elif isinstance(exc, ProviderConfigurationError):
+        message = "Provider credentials are not configured; check the backend provider settings."
+    elif isinstance(exc, ProviderTransportError):
+        message = "The provider could not be reached; check provider availability and timeout settings."
+    elif status is not None and status >= 500:
+        message = "The provider is temporarily unavailable; retry later."
+    else:
+        message = "The provider returned an unusable response; check provider configuration."
+    return _error(503, "provider_error", message)
+
+
+@app.exception_handler(RoutingConfigurationError)
+async def routing_configuration_error_handler(_request: Request, exc: RoutingConfigurationError):
+    return _error(400, "tier_disabled", str(exc))
 
 
 @app.exception_handler(Exception)
-async def unexpected_error_handler(_request: Request, _exc: Exception):
+async def unexpected_error_handler(_request: Request, exc: Exception):
+    logger.error("Unexpected API error: error_type=%s", type(exc).__name__)
     return _error(500, "internal_error", "An internal error occurred")
 
 
@@ -126,6 +157,9 @@ def route_api(body: RouteRequest, settings: Settings = Depends(get_settings)):
     return {
         "answer": result["answer"],
         "model": result["model"],
+        "model_tier": result["model_tier"],
+        "tier_id": result["tier_id"],
+        "provider": result["provider"],
         "routed_to": result["routed_to"],
         "score": result["score"],
         "reasons": result["reasons"],
@@ -204,7 +238,29 @@ def health(settings: Settings = Depends(get_settings)):
         ollama_reachable = 200 <= response.status_code < 400
     except requests.RequestException:
         ollama_reachable = False
+    tiers = [
+        {"id": tier.id, "name": tier.name, "provider": tier.provider,
+         "model_id": tier.model_id, "enabled": tier.id in settings.enabled_tiers}
+        for tier in settings.tiers
+    ]
+    groq_enabled = any(t.provider == "groq" and t.id in settings.enabled_tiers for t in settings.tiers)
+    groq_configured = (
+        settings.groq_api_key is not None
+        and bool(settings.groq_api_key.get_secret_value().strip())
+    )
     return {
+        "status": "ok",
+        "api_status": "ok",
+        "deployment_profile": settings.deployment_profile,
+        "provider_mode": settings.provider_mode,
+        "configured_tiers": tiers,
+        "enabled_routing_tiers": sorted(settings.enabled_tiers),
+        "providers": {
+            "groq": {"enabled": groq_enabled, "credentials_configured": groq_configured,
+                     "configured": (not groq_enabled or groq_configured), "available": None},
+            "ollama": {"enabled": any(t.provider == "ollama" and t.id in settings.enabled_tiers for t in settings.tiers),
+                       "reachable": ollama_reachable},
+        },
         "ollama_reachable": ollama_reachable,
-        "groq_key_configured": settings.groq_api_key is not None,
+        "groq_key_configured": groq_configured,
     }

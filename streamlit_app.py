@@ -14,6 +14,7 @@ from dashboard_data import (
     format_cost,
     load_request_history,
     request_tier,
+    served_tier_label,
     submit_in_replay_mode,
     submit_to_api,
     summarize_requests,
@@ -71,7 +72,11 @@ def _detail_panel(row: dict[str, Any], *, title: str = "Request details") -> Non
     left.metric("Score", row.get("score", "Unavailable"))
     right.metric("Token source", row.get("token_source", "Unavailable"))
     st.markdown("**Routed to vs. served model**")
-    st.write(f"{row.get('routed_to', 'unknown')} → {row.get('model', 'unknown')}")
+    served_tier = served_tier_label(row)
+    st.write(
+        f"{row.get('routed_to', 'unknown')} → {served_tier}, "
+        f"{row.get('model', 'unknown')}"
+    )
     st.markdown("**Reasons**")
     reasons = row.get("reasons") or []
     if reasons:
@@ -182,6 +187,7 @@ if submitted:
                         force_model=override_labels[override_label],
                         threshold=threshold,
                     )
+            result["request_mode"] = "Replay" if replay_mode else "Live API"
             st.session_state["last_submission"] = result
             st.session_state["last_submission_question"] = question.strip()
             st.rerun()
@@ -191,6 +197,7 @@ if submitted:
 last_submission = st.session_state.get("last_submission")
 if last_submission:
     with st.container(border=True):
+        st.caption(f"{last_submission.get('request_mode', 'Request')} request")
         st.markdown(
             f"**Latest answer** · request {last_submission.get('request_id', 'unknown')}"
         )

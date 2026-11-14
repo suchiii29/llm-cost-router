@@ -1,10 +1,11 @@
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
+    NoDecode,
     SettingsConfigDict,
     YamlConfigSettingsSource,
 )
@@ -41,6 +42,12 @@ class Settings(BaseSettings):
     )
 
     provider_mode: Literal["live", "fake"] = "live"
+    deployment_profile: Literal["local", "cloud"] = Field(
+        default="local", validation_alias="ROUTER_DEPLOYMENT_PROFILE"
+    )
+    enabled_tiers: Annotated[list[int], NoDecode] = Field(
+        default_factory=lambda: [0, 1, 2], validation_alias="ROUTER_ENABLED_TIERS"
+    )
     db_url: str = "sqlite:///router.db"
     log_prompts: bool = False
     complexity_threshold: int = 3
@@ -101,6 +108,21 @@ class Settings(BaseSettings):
             raise ValueError("OLLAMA_BASE_URL must be non-empty")
         return value
 
+    @field_validator("enabled_tiers", mode="before")
+    @classmethod
+    def parse_enabled_tiers(cls, value):
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            items = [item.strip() for item in value.split(",")]
+            if any(not item for item in items):
+                raise ValueError("enabled_tiers must be comma-separated tier IDs")
+            try:
+                return [int(item) for item in items]
+            except ValueError as error:
+                raise ValueError("enabled_tiers must contain integer tier IDs") from error
+        return value
+
     @model_validator(mode="after")
     def apply_environment_overrides(self):
         overrides = {
@@ -128,6 +150,10 @@ class Settings(BaseSettings):
         tier_ids = [tier.id for tier in self.tiers]
         if sorted(tier_ids) != [0, 1, 2]:
             raise ValueError("tiers must define exactly IDs 0, 1, and 2")
+        if not self.enabled_tiers or len(set(self.enabled_tiers)) != len(self.enabled_tiers):
+            raise ValueError("enabled_tiers must contain unique tier IDs")
+        if any(tier_id not in tier_ids for tier_id in self.enabled_tiers):
+            raise ValueError("enabled_tiers must refer to configured tiers")
         if self.complexity_threshold < 0:
             raise ValueError("complexity_threshold must be non-negative")
         if self.retry_attempts < 1:

@@ -111,6 +111,8 @@ uvicorn app.api:app --reload
 
 All routes except `/health` require the same key in the `X-API-Key` header. `POST /v1/route` accepts a question (1–4000 characters), an optional `force_model` (`local`, `cheap`, or `strong`), and an optional threshold. `GET /v1/requests` reads request history from SQLite; `GET /v1/config` returns configured tier IDs only. A per-key in-memory limit defaults to 60 requests per minute and can be changed with `API_RATE_LIMIT_PER_MINUTE`. `/health` checks Ollama HTTP reachability and whether a Groq key is configured; it does not call a model.
 
+`ROUTER_ENABLED_TIERS` is a comma-separated list of tier IDs and defaults to `0,1,2` for local development. For a cloud service without access to local Ollama, set it to `1,2`; low-complexity Automatic requests then use Cheap, and Strong failures can fall back to Cheap. Set `ROUTER_DEPLOYMENT_PROFILE` to `local` or `cloud` for health diagnostics. The profile is informational; `ROUTER_ENABLED_TIERS` controls routing.
+
 ### Docker Compose
 
 Copy `.env.example` to `.env` and fill in the credentials you intend to use, then run `docker compose up --build`. Compose starts the API on port 8000 and the Streamlit dashboard on port 8501. Both services share the `router_data` volume for the SQLite database. Compose sets `OLLAMA_BASE_URL` to `http://host.docker.internal:11434` unless you override it. On Docker Desktop for Mac, that hostname reaches services on the host. On Linux, Compose maps it to the host gateway; configure host Ollama to listen on an interface reachable from Docker (commonly `OLLAMA_HOST=0.0.0.0:11434`) and allow port 11434 through the host firewall. Keep Ollama access limited to trusted networks.

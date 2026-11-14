@@ -81,6 +81,15 @@ def request_tier(row: dict[str, Any], settings: Optional[Settings] = None) -> st
     return "unknown tier"
 
 
+def served_tier_label(row: dict[str, Any]) -> str:
+    """Format the tier actually reported by the serving API, without inference."""
+    tier_id = row.get("tier_id")
+    model_tier = row.get("model_tier")
+    if tier_id is None or not model_tier:
+        return "Unavailable"
+    return f"tier {tier_id} · {model_tier}"
+
+
 def summarize_requests(
     rows: list[dict[str, Any]], settings: Optional[Settings] = None
 ) -> dict[str, Any]:
@@ -196,7 +205,14 @@ def submit_to_api(
     except requests.RequestException as error:
         raise RuntimeError("Could not reach the router API") from error
     if response.status_code >= 400:
-        raise RuntimeError(f"Router API returned HTTP {response.status_code}")
+        try:
+            error_payload = response.json().get("error", {})
+            message = error_payload.get("message")
+        except (ValueError, AttributeError):
+            message = None
+        raise RuntimeError(
+            message or f"Router API returned HTTP {response.status_code}"
+        )
     result = response.json()
     if not isinstance(result, dict):
         raise ValueError("Router API returned an invalid response")
@@ -224,6 +240,9 @@ def submit_in_replay_mode(
     return {
         "answer": result["answer"],
         "model": result["model"],
+        "model_tier": result["model_tier"],
+        "tier_id": result["tier_id"],
+        "provider": result["provider"],
         "routed_to": result["routed_to"],
         "score": result["score"],
         "reasons": result["reasons"],

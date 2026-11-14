@@ -5,10 +5,13 @@ import os
 import unittest
 from unittest.mock import Mock, mock_open, patch
 
+import requests
+from pydantic import SecretStr
 from checker import extract_number
 from evaluate import evaluate_cache
 from app.config import Settings, TierSettings
-from app.providers.base import ProviderResponse
+from app.providers.base import ProviderHTTPError, ProviderResponse, ProviderTransportError
+from app.providers.groq import GroqProvider
 from model_adapter import (
     GroqAPIError,
     GroqConfigurationError,
@@ -150,6 +153,91 @@ class GroqAdapterTests(unittest.TestCase):
         self.assertFalse(raised.exception.recoverable)
         self.assertEqual(post.call_count, 1)
 
+    def _assert_transport_failure_falls_back(self, transport_error):
+        settings = app_settings()
+        settings.provider_mode = "live"
+        settings.groq_api_key = SecretStr("test-key")
+        transport_errors = []
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "model": settings.tier(1).model_id,
+            "choices": [{"message": {"content": "fallback answer"}}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 2},
+        }
+
+        def generate_with_real_provider_adapter(question, tier, config):
+            from app.providers import get_provider
+
+            try:
+                return get_provider(config, tier).generate(question, tier.model_id)
+            except ProviderTransportError as error:
+                transport_errors.append(error)
+                raise
+
+        with (
+            patch(
+                "app.providers.base.requests.post",
+                side_effect=[transport_error, response],
+            ) as post,
+            patch("app.providers.groq.record_metrics"),
+            patch("app.routing.router.log_request"),
+            patch(
+                "app.routing.router.ask_tier",
+                side_effect=generate_with_real_provider_adapter,
+            ),
+        ):
+            result = route_question(
+                "Explain and compare two algorithms",
+                display=False,
+                threshold=0,
+                settings=settings,
+            )
+
+        self.assertEqual(len(transport_errors), 1)
+        self.assertIsInstance(transport_errors[0], ProviderTransportError)
+        self.assertTrue(transport_errors[0].recoverable)
+        self.assertTrue(result["fallback"])
+        self.assertEqual(result["tier_id"], 1)
+        self.assertEqual(post.call_count, 2)
+
+    def test_timeout_becomes_recoverable_transport_error_and_router_falls_back(self):
+        self._assert_transport_failure_falls_back(requests.Timeout("timed out"))
+
+    def test_connection_error_becomes_recoverable_transport_error_and_router_falls_back(self):
+        self._assert_transport_failure_falls_back(
+            requests.ConnectionError("connection failed")
+        )
+
+    @patch("app.providers.base.requests.post")
+    def test_http_503_retries_exactly_configured_attempts_then_remains_recoverable(
+        self, post
+    ):
+        post.return_value = Mock(status_code=503)
+        provider = GroqProvider(
+            "test-key", retry_attempts=4, sleep=lambda _delay: None
+        )
+
+        with self.assertRaises(ProviderHTTPError) as raised:
+            provider.generate("question", CONFIG.strong_model_id)
+
+        self.assertEqual(post.call_count, 4)
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertTrue(raised.exception.recoverable)
+
+    @patch("app.providers.base.requests.post")
+    def test_http_400_is_not_retried_and_is_non_recoverable(self, post):
+        post.return_value = Mock(status_code=400)
+        provider = GroqProvider(
+            "test-key", retry_attempts=4, sleep=lambda _delay: None
+        )
+
+        with self.assertRaises(ProviderHTTPError) as raised:
+            provider.generate("question", CONFIG.strong_model_id)
+
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertFalse(raised.exception.recoverable)
+
     @patch("app.providers.base.open", new_callable=mock_open, create=True)
     def test_metrics_file_does_not_contain_answer_text(self, open_file):
         from model_adapter import record_metrics
@@ -215,6 +303,51 @@ class RouterTests(unittest.TestCase):
             groq = route_question("What is 2 + 2?", force_model="groq")
         self.assertEqual([local["tier_id"], cheap["tier_id"], strong["tier_id"], groq["tier_id"]], [0, 1, 2, 2])
         self.assertTrue(all(result["overridden"] for result in (local, cheap, strong, groq)))
+
+    @patch("app.routing.router.log_request")
+    @patch("app.routing.router.ask_tier")
+    def test_cloud_auto_uses_only_enabled_groq_tiers(self, ask, _log):
+        settings = app_settings()
+        settings.enabled_tiers = [1, 2]
+        ask.side_effect = lambda question, tier, _config: provider_response_for(tier)
+        low = route_question("hello", display=False, settings=settings)
+        high = route_question("Explain and compare two Python algorithms", display=False, settings=settings)
+        self.assertEqual(low["tier_id"], 1)
+        self.assertEqual(high["tier_id"], 2)
+
+    @patch("app.routing.router.log_request")
+    @patch("app.routing.router.ask_tier")
+    def test_cloud_strong_falls_back_to_cheap(self, ask, _log):
+        settings = app_settings()
+        settings.enabled_tiers = [1, 2]
+        ask.side_effect = [
+            GroqAPIError("503 unavailable", 503, True),
+            provider_response_for(settings.tier(1)),
+        ]
+        result = route_question("Explain and compare two Python algorithms", display=False, settings=settings)
+        self.assertEqual([call.args[1].id for call in ask.call_args_list], [2, 1])
+        self.assertEqual(result["tier_id"], 1)
+        self.assertTrue(result["fallback"])
+
+    @patch("app.routing.router.log_request")
+    def test_cloud_local_override_is_clear_error(self, _log):
+        settings = app_settings()
+        settings.enabled_tiers = [1, 2]
+        with self.assertRaisesRegex(ValueError, "local tier is disabled"):
+            route_question("hello", force_model="local", display=False, settings=settings)
+
+    @patch("app.routing.router.log_request")
+    @patch("app.routing.router.ask_tier")
+    def test_local_failure_escalates_to_enabled_cheap_tier(self, ask, _log):
+        settings = app_settings()
+        ask.side_effect = [
+            GroqAPIError("connection unavailable", None, True),
+            provider_response_for(settings.tier(1)),
+        ]
+        result = route_question("hello", display=False, settings=settings)
+        self.assertEqual([call.args[1].id for call in ask.call_args_list], [0, 1])
+        self.assertEqual(result["tier_id"], 1)
+        self.assertTrue(result["fallback"])
 
 
 class TrackerOverrideTests(unittest.TestCase):

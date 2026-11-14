@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import requests
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from app.api import app, _rate_events, _rate_lock
 from app.config import Settings, TierSettings, get_settings
@@ -78,6 +79,39 @@ class ApiTests(unittest.TestCase):
         self.assertIsInstance(payload["request_id"], int)
         self.assertEqual(payload["token_source"], "estimated")
 
+    @patch("app.api.route_question")
+    def test_successful_route_response_includes_served_tier_fields(self, route_question):
+        route_question.return_value = {
+            "answer": "mock answer",
+            "model": "mock-model-v2",
+            "model_tier": "strong",
+            "tier_id": 2,
+            "provider": "groq",
+            "routed_to": "strong",
+            "score": 5,
+            "reasons": ["mock reason"],
+            "fallback": False,
+            "fallback_reason": None,
+            "overridden": False,
+            "provider_usage": {"input_tokens": 8, "output_tokens": 4},
+            "token_source": "provider",
+            "latency_ms": 120,
+            "cost_usd": 0.01,
+            "baseline_cost_usd": 0.01,
+            "request_id": 17,
+        }
+
+        response = self.client.post(
+            "/v1/route", headers=self.auth_headers(), json={"question": "hello"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["model_tier"], "strong")
+        self.assertEqual(payload["tier_id"], 2)
+        self.assertEqual(payload["provider"], "groq")
+        route_question.assert_called_once()
+
     @patch("app.routing.router.ask_tier")
     def test_fallback_flags_and_reason_are_returned(self, ask_tier):
         ask_tier.side_effect = [
@@ -121,10 +155,68 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.json(),
-            {"ollama_reachable": False, "groq_key_configured": False},
+            response.json()["status"], "ok",
         )
+        self.assertFalse(response.json()["providers"]["ollama"]["reachable"])
+        self.assertFalse(response.json()["providers"]["groq"]["credentials_configured"])
         get.assert_called_once()
+
+    @patch("app.api.requests.get", side_effect=requests.ConnectionError("offline"))
+    def test_health_reports_cloud_profile_without_ollama_health_failure(self, _get):
+        self.settings.enabled_tiers = [1, 2]
+        self.settings.deployment_profile = "cloud"
+        self.settings.groq_api_key = SecretStr("test-groq-key")
+        payload = self.client.get("/health").json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["deployment_profile"], "cloud")
+        self.assertEqual(payload["enabled_routing_tiers"], [1, 2])
+        self.assertTrue(payload["providers"]["groq"]["configured"])
+        self.assertTrue(payload["providers"]["groq"]["credentials_configured"])
+        self.assertTrue(payload["groq_key_configured"])
+        self.assertFalse(payload["providers"]["ollama"]["reachable"])
+        self.assertNotIn("test-groq-key", str(payload))
+
+    @patch("app.api.requests.get", side_effect=requests.ConnectionError("offline"))
+    def test_health_treats_empty_and_whitespace_groq_keys_as_unconfigured(self, _get):
+        for secret in ("", "  \t\n"):
+            with self.subTest(secret=repr(secret)):
+                self.settings.groq_api_key = SecretStr(secret)
+                payload = self.client.get("/health").json()
+                self.assertFalse(payload["providers"]["groq"]["credentials_configured"])
+                self.assertFalse(payload["providers"]["groq"]["configured"])
+                self.assertFalse(payload["groq_key_configured"])
+
+    def test_provider_failure_returns_safe_actionable_error(self):
+        with patch("app.routing.router.ask_tier", side_effect=ProviderHTTPError("HTTP 401", 401)):
+            response = self.client.post(
+                "/v1/route", headers=self.auth_headers(),
+                json={"question": "Explain and compare algorithms", "force_model": "strong"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("check the configured provider key", response.json()["error"]["message"])
+        self.assertNotIn("HTTP 401", response.text)
+
+    def test_manual_disabled_local_tier_returns_clear_client_error(self):
+        self.settings.enabled_tiers = [1, 2]
+        response = self.client.post(
+            "/v1/route", headers=self.auth_headers(),
+            json={"question": "hello", "force_model": "local"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "tier_disabled")
+        self.assertIn("disabled", response.json()["error"]["message"])
+
+    def test_cloud_cheap_failure_has_safe_error_when_no_fallback_is_enabled(self):
+        self.settings.enabled_tiers = [1, 2]
+        with patch("app.routing.router.ask_tier", side_effect=ProviderHTTPError("HTTP 503", 503)):
+            response = self.client.post(
+                "/v1/route", headers=self.auth_headers(),
+                json={"question": "hello", "force_model": "cheap"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"]["code"], "provider_error")
+        self.assertIn("temporarily unavailable", response.json()["error"]["message"])
+        self.assertNotIn("HTTP 503", response.text)
 
     def test_config_only_returns_tier_ids_and_history_reads_logged_rows(self):
         config = self.client.get("/v1/config", headers=self.auth_headers())

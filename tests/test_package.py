@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import requests
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -158,12 +159,49 @@ class CostAndStorageTests(unittest.TestCase):
 
 
 class SettingsTests(unittest.TestCase):
-    @patch.dict("os.environ", {"DB_URL": "sqlite://", "PROVIDER_MODE": "fake"})
+    @patch.dict("os.environ", {
+        "DB_URL": "sqlite://", "PROVIDER_MODE": "fake",
+        "ROUTER_ENABLED_TIERS": "1,2", "ROUTER_DEPLOYMENT_PROFILE": "cloud",
+    })
     def test_settings_load_yaml_defaults_and_environment_overrides(self):
         settings = get_settings()
         self.assertEqual(settings.db_url, "sqlite://")
         self.assertEqual(settings.provider_mode, "fake")
         self.assertEqual([tier.id for tier in settings.tiers], [0, 1, 2])
+        self.assertEqual(settings.enabled_tiers, [1, 2])
+        self.assertEqual(settings.deployment_profile, "cloud")
+
+    def test_profile_defaults_to_local_and_rejects_other_values(self):
+        settings = Settings(_env_file=None)
+        self.assertEqual(settings.deployment_profile, "local")
+        with self.assertRaises(ValidationError):
+            Settings(_env_file=None, deployment_profile="staging")
+
+    def test_enabled_tiers_accepts_comma_separated_ids_and_preserves_defaults(self):
+        defaults = Settings(_env_file=None)
+        cloud = Settings(_env_file=None, enabled_tiers=" 1, 2 ")
+        self.assertEqual(defaults.enabled_tiers, [0, 1, 2])
+        self.assertEqual(cloud.enabled_tiers, [1, 2])
+
+    def test_enabled_tiers_rejects_empty_values(self):
+        for value in ("", " ", "1,,2", "1, "):
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    Settings(_env_file=None, enabled_tiers=value)
+
+    def test_enabled_tiers_rejects_duplicates(self):
+        with self.assertRaises(ValidationError):
+            Settings(_env_file=None, enabled_tiers="1,1")
+
+    def test_enabled_tiers_rejects_non_integer_ids(self):
+        with self.assertRaises(ValidationError):
+            Settings(_env_file=None, enabled_tiers="1,two")
+
+    def test_enabled_tiers_rejects_ids_outside_zero_through_two(self):
+        for value in ("-1", "3"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    Settings(_env_file=None, enabled_tiers=value)
 
 
 if __name__ == "__main__":
