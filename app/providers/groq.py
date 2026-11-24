@@ -44,6 +44,14 @@ class GroqProvider(BaseProvider):
         usage = data.get("usage") or {}
         if not isinstance(usage, dict):
             raise ProviderResponseError("Groq returned invalid usage metadata")
+        prompt_details = usage.get("prompt_tokens_details")
+        cached_tokens = (
+            prompt_details.get("cached_tokens")
+            if isinstance(prompt_details, dict)
+            else usage.get("cached_input_tokens")
+        )
+        if isinstance(cached_tokens, bool) or not isinstance(cached_tokens, int) or cached_tokens < 0:
+            cached_tokens = None
         result = make_response(
             answer=answer,
             question=question,
@@ -52,6 +60,13 @@ class GroqProvider(BaseProvider):
             started_at=started_at,
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
+            total_tokens=usage.get("total_tokens"),
+        )
+        result = ProviderResponse(
+            **{
+                **result.__dict__,
+                "cached_input_tokens": cached_tokens,
+            }
         )
         record_metrics(result)
         return result

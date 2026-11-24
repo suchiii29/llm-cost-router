@@ -18,7 +18,7 @@ from app.routing.router import route_question
 from app.storage.db import RequestRecord, get_engine
 
 
-def _row_dict(record: RequestRecord) -> dict[str, Any]:
+def _row_dict(record: RequestRecord, settings: Settings) -> dict[str, Any]:
     return {
         "request_id": record.id,
         "created_at": record.created_at,
@@ -28,15 +28,28 @@ def _row_dict(record: RequestRecord) -> dict[str, Any]:
         "reasons": json.loads(record.reasons_json),
         "routed_to": record.routed_to,
         "model": record.model,
+        "provider": record.provider or next(
+            (tier.provider for tier in settings.tiers if tier.model_id == record.model),
+            None,
+        ),
         "fallback": record.fallback,
         "fallback_reason": record.fallback_reason,
         "overridden": record.overridden,
         "input_tokens": record.input_tokens,
         "output_tokens": record.output_tokens,
+        "total_tokens": record.total_tokens,
         "token_source": record.token_source,
         "latency_ms": record.latency_ms,
         "cost_usd": record.cost_usd,
         "baseline_cost_usd": record.baseline_cost_usd,
+        "input_cost_usd": record.input_cost_usd,
+        "output_cost_usd": record.output_cost_usd,
+        "cost_currency": record.cost_currency or "USD",
+        "actual_model": record.actual_model or (record.model if record.request_status != "failure" else None),
+        "pricing_version": record.pricing_version,
+        "cost_status": record.cost_status or ("legacy_estimate" if record.cost_usd is not None else "unavailable"),
+        "api_attempts": json.loads(record.attempts_json) if record.attempts_json else [],
+        "request_status": record.request_status or "success",
         "cache_hit": record.cache_hit,
     }
 
@@ -72,7 +85,7 @@ def load_request_history(
             .offset(offset)
         )
         with Session(engine) as session:
-            return [_row_dict(row) for row in session.scalars(statement).all()]
+            return [_row_dict(row, settings) for row in session.scalars(statement).all()]
     except SQLAlchemyError as error:
         raise RuntimeError("Could not read dashboard request history from SQLite") from error
 
@@ -235,12 +248,6 @@ def summarize_requests(
         if isinstance(latency, (int, float)) and latency >= 0:
             latencies.append(float(latency))
 
-    def total(field: str) -> Optional[float]:
-        values = [row.get(field) for row in rows]
-        if not values or any(value is None for value in values):
-            return None
-        return sum(float(value) for value in values)
-
     def percentile(values: list[float], fraction: float) -> Optional[float]:
         if not values:
             return None
@@ -248,6 +255,55 @@ def summarize_requests(
         index = max(0, math.ceil(fraction * len(ordered)) - 1)
         return ordered[index]
 
+    comparable = [
+        row for row in rows
+        if row.get("cost_status") in ("measured", "actual")
+        and row.get("cost_usd") is not None
+        and row.get("baseline_cost_usd") is not None
+        and row.get("input_tokens") is not None
+        and row.get("output_tokens") is not None
+        and row.get("token_source") == "provider"
+        and row.get("request_status", "success") == "success"
+    ]
+    measured_costs = [
+        row for row in rows
+        if row.get("cost_status") in ("measured", "actual")
+        and row.get("cost_usd") is not None
+    ]
+    total_actual = sum(float(row["cost_usd"]) for row in measured_costs) if measured_costs else None
+    estimated_cost_rows = [
+        row for row in rows
+        if row.get("cost_status") in ("estimated", "simulated")
+        and row.get("cost_usd") is not None
+    ]
+    total_estimated = (
+        sum(float(row["cost_usd"]) for row in estimated_cost_rows)
+        if estimated_cost_rows else None
+    )
+    local_cost_rows = [
+        row for row in rows
+        if row.get("cost_status") == "local"
+        and row.get("cost_usd") is not None
+    ]
+    total_local = (
+        sum(float(row["cost_usd"]) for row in local_cost_rows)
+        if local_cost_rows else None
+    )
+    baseline_total = sum(float(row["baseline_cost_usd"]) for row in comparable)
+    savings = sum(float(row["baseline_cost_usd"]) - float(row["cost_usd"]) for row in comparable) if comparable else None
+    model_costs: dict[str, float] = {}
+    tier_costs: dict[str, float] = {}
+    for row in measured_costs:
+        model_name = row.get("actual_model") or row.get("model") or "Unknown"
+        model_costs[model_name] = model_costs.get(model_name, 0.0) + float(row["cost_usd"])
+        tier_name = row.get("model_tier") or request_tier(row, settings)
+        tier_costs[tier_name] = tier_costs.get(tier_name, 0.0) + float(row["cost_usd"])
+    token_rows = [
+        row for row in rows
+        if row.get("input_tokens") is not None
+        and row.get("output_tokens") is not None
+        and row.get("token_source") in ("provider", "estimated")
+    ]
     return {
         "requests": count,
         "tier_counts": tiers,
@@ -257,8 +313,25 @@ def summarize_requests(
         },
         "fallbacks": sum(bool(row.get("fallback")) for row in rows),
         "overrides": sum(bool(row.get("overridden")) for row in rows),
-        "estimated_cost_usd": total("cost_usd"),
-        "counterfactual_strong_cost_usd": total("baseline_cost_usd"),
+        "estimated_cost_usd": total_actual,
+        "counterfactual_strong_cost_usd": baseline_total if comparable else None,
+        "measured_api_cost_usd": total_actual,
+        "estimated_api_cost_usd": total_estimated,
+        "local_api_cost_usd": total_local,
+        "total_input_tokens": sum(int(row["input_tokens"]) for row in token_rows) if token_rows else 0,
+        "total_output_tokens": sum(int(row["output_tokens"]) for row in token_rows) if token_rows else 0,
+        "average_api_cost_usd": total_actual / len(measured_costs) if measured_costs else None,
+        "cost_by_model": model_costs,
+        "cost_by_tier": tier_costs,
+        "estimated_savings_usd": savings,
+        "savings_percentage": (savings / baseline_total * 100) if savings is not None and baseline_total else None,
+        "comparable_requests": len(comparable),
+        "unavailable_cost_requests": sum(
+            row.get("cost_status") not in (
+                "measured", "actual", "estimated", "simulated", "local"
+            ) or row.get("cost_usd") is None
+            for row in rows
+        ),
         "p50_latency_ms": percentile(latencies, 0.50),
         "p95_latency_ms": percentile(latencies, 0.95),
     }
@@ -303,10 +376,39 @@ def filter_requests(
     return filtered
 
 
-def format_cost(value: Optional[float]) -> str:
+def format_cost(value: Optional[float], cost_status: Optional[str] = None) -> str:
     if value is None:
         return "Cost unavailable"
+    if cost_status == "local":
+        return "$0.00000000 (local API; hardware/electricity unmeasured)"
+    if cost_status == "unknown":
+        return "Cost unavailable (unknown)"
+    if cost_status in ("measured", "actual"):
+        return f"${value:.8f} (actual)"
+    if cost_status == "simulated":
+        return f"${value:.8f} (simulated)"
+    if cost_status == "estimated":
+        return f"${value:.8f} (estimated)"
     return f"${value:.8f} (estimated)"
+
+
+def unavailable_cost_explanation(row: dict[str, Any]) -> str:
+    cost_status = row.get("cost_status")
+    if cost_status == "unknown":
+        return "Request cost incomplete because an attempt's usage is unknown."
+    if cost_status == "unavailable_usage":
+        return "Provider usage information unavailable."
+    if (
+        cost_status == "unavailable_pricing"
+        or row.get("input_tokens") is not None
+        and row.get("output_tokens") is not None
+    ) and cost_status not in ("unknown", "unavailable_usage"):
+        return "Model pricing is not configured."
+    if row.get("token_source") == "unavailable" or (
+        row.get("input_tokens") is None or row.get("output_tokens") is None
+    ):
+        return "Provider usage information unavailable."
+    return "Cost unavailable."
 
 
 def submit_to_api(
@@ -380,10 +482,15 @@ def submit_in_replay_mode(
         "overridden": result["overridden"],
         "input_tokens": usage["input_tokens"],
         "output_tokens": usage["output_tokens"],
+        "total_tokens": usage.get("total_tokens"),
         "token_source": result["token_source"],
         "latency_ms": result["latency_ms"],
         "cost_usd": result["cost_usd"],
         "baseline_cost_usd": result["baseline_cost_usd"],
+        "cost_status": result["cost_status"],
+        "actual_model": result["model"],
+        "pricing_version": result["pricing_version"],
+        "api_attempts": result["api_attempts"],
         "request_id": result["request_id"],
     }
 

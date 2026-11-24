@@ -23,6 +23,7 @@ from dashboard_data import (
     submit_in_replay_mode,
     submit_to_api,
     summarize_requests,
+    unavailable_cost_explanation,
 )
 
 
@@ -59,7 +60,10 @@ def _display_row(row: dict[str, Any], settings) -> dict[str, Any]:
         ),
         "Tier": request_tier(row, settings),
         "Routed to": row.get("routed_to"),
-        "Model": row.get("model"),
+        "Actual model": row.get("actual_model") or (
+            "No successful response" if row.get("request_status") == "failure"
+            else row.get("model")
+        ),
         "Score": row.get("score"),
         "Fallback": row.get("fallback"),
         "Override": row.get("overridden"),
@@ -71,7 +75,14 @@ def _display_row(row: dict[str, Any], settings) -> dict[str, Any]:
         ),
         "Token source": row.get("token_source"),
         "Latency (ms)": row.get("latency_ms"),
-        "Cost": format_cost(row.get("cost_usd")),
+        "API cost": format_cost(row.get("cost_usd"), row.get("cost_status")),
+        "Estimated strong baseline": format_cost(row.get("baseline_cost_usd")),
+        "Estimated API savings": format_cost(
+            float(row["baseline_cost_usd"]) - float(row["cost_usd"])
+            if row.get("cost_usd") is not None and row.get("baseline_cost_usd") is not None
+            else None
+        ),
+        "Cost status": row.get("cost_status") or "Unavailable",
     }
 
 
@@ -99,9 +110,9 @@ def _detail_panel(row: dict[str, Any], *, title: str = "Request details") -> Non
         st.markdown("**Answer**")
         st.markdown(row["answer"])
     if row.get("cost_usd") is None:
-        st.caption("Cost unavailable because model rates are unset.")
+        st.caption(unavailable_cost_explanation(row))
     else:
-        st.caption(f"Request cost: {format_cost(row['cost_usd'])}")
+        st.caption(f"Request cost: {format_cost(row['cost_usd'], row.get('cost_status'))}")
 
 
 st.title("LLM Cost Router")
@@ -153,25 +164,36 @@ for column, tier in zip(cards[1:4], settings.tiers):
 cards[4].metric("Fallbacks", summary["fallbacks"] if summary else "Unavailable")
 cards[5].metric("Overrides", summary["overrides"] if summary else "Unavailable")
 
-cost_cards = st.columns(4)
-cost_cards[0].metric(
-    "Estimated cost",
-    format_cost(summary["estimated_cost_usd"]) if summary else "Unavailable",
-)
-cost_cards[1].metric(
-    "Counterfactual strong-only cost",
-    format_cost(summary["counterfactual_strong_cost_usd"])
-    if summary else "Unavailable",
-)
-for column, key, label in (
-    (cost_cards[2], "p50_latency_ms", "p50 latency"),
-    (cost_cards[3], "p95_latency_ms", "p95 latency"),
+st.header("Cost Analytics")
+cost_cards = st.columns(5)
+cost_cards[0].metric("Actual API cost", format_cost(summary["measured_api_cost_usd"], "actual") if summary else "Unavailable")
+cost_cards[1].metric("Input tokens", f"{summary['total_input_tokens']:,}" if summary else "Unavailable")
+cost_cards[2].metric("Output tokens", f"{summary['total_output_tokens']:,}" if summary else "Unavailable")
+cost_cards[3].metric("Average cost per request", format_cost(summary["average_api_cost_usd"], "actual") if summary else "Unavailable")
+cost_cards[4].metric("Unavailable cost records", summary["unavailable_cost_requests"] if summary else "Unavailable")
+cost_comparison = st.columns(5)
+cost_comparison[0].metric("Estimated API cost", format_cost(summary["estimated_api_cost_usd"], "estimated") if summary else "Unavailable")
+cost_comparison[1].metric("Local Ollama API cost", format_cost(summary["local_api_cost_usd"], "local") if summary else "Unavailable")
+cost_comparison[2].metric("Estimated always-strong baseline", format_cost(summary["counterfactual_strong_cost_usd"], "estimated") if summary else "Unavailable")
+cost_comparison[3].metric("Estimated API savings", format_cost(summary["estimated_savings_usd"], "estimated") if summary else "Unavailable")
+cost_comparison[4].metric("Savings percentage", f"{summary['savings_percentage']:.1f}%" if summary and summary["savings_percentage"] is not None else "Unavailable")
+if summary and summary["cost_by_model"]:
+    model_col, tier_col = st.columns(2)
+    model_col.markdown("**Measured API cost by model**")
+    model_col.dataframe(pd.DataFrame([{"Model": key, "API cost": format_cost(value, "actual")} for key, value in summary["cost_by_model"].items()]), hide_index=True, use_container_width=True)
+    tier_col.markdown("**Measured API cost by tier**")
+    tier_col.dataframe(pd.DataFrame([{"Tier": key, "API cost": format_cost(value, "actual")} for key, value in summary["cost_by_tier"].items()]), hide_index=True, use_container_width=True)
+latency_cards = st.columns(2)
+for column, key, label in zip(
+    latency_cards,
+    ("p50_latency_ms", "p95_latency_ms"),
+    ("p50 latency", "p95 latency"),
 ):
     value = summary[key] if summary else None
     column.metric(label, f"{value:.0f} ms" if value is not None else "Unavailable")
 if summary and rows and (
-    summary["estimated_cost_usd"] is None
-    or summary["counterfactual_strong_cost_usd"] is None
+    summary["measured_api_cost_usd"] is None
+    or summary["comparable_requests"] < summary["requests"]
 ):
     missing_rates = missing_cost_rate_settings(settings)
     if missing_rates:
@@ -190,8 +212,7 @@ if summary and rows and (
         st.info("Some historical requests were recorded without cost estimates.")
 else:
     st.caption(
-        "Costs are estimates from backend configured rates and recorded token counts. "
-        "Counterfactual strong-only cost uses each request's same token counts."
+        "Actual API cost uses configured rates and provider reported usage. The always-strong baseline is a token-based hypothetical using the same token counts; it is not a second call or proof of identical answers. Local API inference is $0, excluding hardware and electricity."
     )
 
 st.header("Ask a question")

@@ -78,7 +78,7 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(payload["overridden"])
         self.assertFalse(payload["fallback"])
         self.assertIsInstance(payload["request_id"], int)
-        self.assertEqual(payload["token_source"], "estimated")
+        self.assertEqual(payload["token_source"], "provider")
 
     @patch("app.api.route_question")
     def test_successful_route_response_includes_served_tier_fields(self, route_question):
@@ -237,6 +237,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(history.json()["items"][0]["tier_id"], 0)
         self.assertEqual(history.json()["items"][0]["model_tier"], "local")
         self.assertEqual(history.json()["items"][0]["provider"], "ollama")
+        self.assertIn("cost_status", history.json()["items"][0])
+        self.assertEqual(history.json()["items"][0]["actual_model"], "local-model")
+        self.assertEqual(history.json()["items"][0]["cost_currency"], "USD")
 
 
 if __name__ == "__main__":

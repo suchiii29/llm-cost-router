@@ -10,7 +10,7 @@ import requests
 from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 
-TOKEN_SOURCE = Literal["provider", "estimated"]
+TOKEN_SOURCE = Literal["provider", "estimated", "unavailable"]
 METRICS_FILE = "model_metrics_groq.jsonl"
 
 
@@ -27,10 +27,14 @@ class ProviderHTTPError(ProviderError):
         status_code: Optional[int] = None,
         recoverable: Optional[bool] = None,
         retry_after_seconds: Optional[float] = None,
+        usage: Optional[dict] = None,
+        model_id: Optional[str] = None,
     ) -> None:
         super().__init__(message, status_code)
         self._recoverable_override = recoverable
         self.retry_after_seconds = retry_after_seconds
+        self.usage = usage or {}
+        self.model_id = model_id
 
     @property
     def retryable(self) -> bool:
@@ -60,15 +64,23 @@ class ProviderResponseError(ProviderError):
 @dataclass(frozen=True)
 class ProviderResponse:
     answer: str
-    input_tokens: int
-    output_tokens: int
+    input_tokens: Optional[int]
+    output_tokens: Optional[int]
     token_source: TOKEN_SOURCE
     latency_ms: int
     model_id: str
     provider: str
+    reported_total_tokens: Optional[int] = None
+    input_token_source: Optional[str] = None
+    output_token_source: Optional[str] = None
+    cached_input_tokens: Optional[int] = None
 
     @property
-    def total_tokens(self) -> int:
+    def total_tokens(self) -> Optional[int]:
+        if self.reported_total_tokens is not None:
+            return self.reported_total_tokens
+        if self.input_tokens is None or self.output_tokens is None:
+            return None
         return self.input_tokens + self.output_tokens
 
     @property
@@ -76,8 +88,10 @@ class ProviderResponse:
         return self.latency_ms / 1000
 
 
-def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 4) if text else 0
+def _token_count(value: object) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def make_response(
@@ -89,20 +103,34 @@ def make_response(
     started_at: float,
     input_tokens: Optional[int],
     output_tokens: Optional[int],
+    total_tokens: Optional[int] = None,
 ) -> ProviderResponse:
-    from_provider = input_tokens is not None and output_tokens is not None
+    actual_input = _token_count(input_tokens)
+    actual_output = _token_count(output_tokens)
+    estimated_input = max(1, len(question) // 4) if question else 0
+    estimated_output = max(1, len(answer) // 4) if answer else 0
+    final_input = actual_input if actual_input is not None else estimated_input
+    final_output = actual_output if actual_output is not None else estimated_output
+    input_source = "provider" if actual_input is not None else "estimated"
+    output_source = "provider" if actual_output is not None else "estimated"
+    token_source = (
+        "provider"
+        if input_source == "provider" and output_source == "provider"
+        else "estimated"
+        if input_source == "estimated" or output_source == "estimated"
+        else "unavailable"
+    )
     return ProviderResponse(
         answer=answer,
-        input_tokens=(
-            input_tokens if input_tokens is not None else estimate_tokens(question)
-        ),
-        output_tokens=(
-            output_tokens if output_tokens is not None else estimate_tokens(answer)
-        ),
-        token_source="provider" if from_provider else "estimated",
+        input_tokens=final_input,
+        output_tokens=final_output,
+        token_source=token_source,
         latency_ms=max(0, round((time.perf_counter() - started_at) * 1000)),
         model_id=model_id,
         provider=provider,
+        reported_total_tokens=_token_count(total_tokens),
+        input_token_source=input_source,
+        output_token_source=output_source,
     )
 
 
@@ -192,10 +220,19 @@ class BaseProvider(ABC):
                 if status_code >= 400:
                     response_headers = getattr(response, "headers", {})
                     retry_after = response_headers.get("Retry-After")
+                    try:
+                        error_data = response.json()
+                    except (requests.exceptions.JSONDecodeError, ValueError):
+                        error_data = {}
+                    error_usage = error_data.get("usage", {}) if isinstance(error_data, dict) else {}
+                    if not isinstance(error_usage, dict):
+                        error_usage = {}
                     raise ProviderHTTPError(
                         f"HTTP {status_code}",
                         status_code=status_code,
                         retry_after_seconds=_parse_retry_after(retry_after),
+                        usage=error_usage,
+                        model_id=error_data.get("model") if isinstance(error_data, dict) else None,
                     )
                 try:
                     data = response.json()

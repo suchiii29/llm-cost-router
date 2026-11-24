@@ -441,7 +441,7 @@ class MetricTests(unittest.TestCase):
         self.assertIsNone(result["estimated_cost_usd"])
         self.assertEqual(
             result["token_source"],
-            "estimated (characters / 4)",
+            "unavailable",
         )
 
     @patch("app.tracking.get_settings", return_value=APP_SETTINGS)

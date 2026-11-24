@@ -22,6 +22,7 @@ from dashboard_data import (
     submit_in_replay_mode,
     submit_to_api,
     summarize_requests,
+    unavailable_cost_explanation,
 )
 
 
@@ -83,7 +84,7 @@ def add_request(
         overridden=overridden,
         input_tokens=10,
         output_tokens=5,
-        token_source="estimated",
+        token_source="provider",
         latency_ms=latency,
         cost_usd=cost,
         baseline_cost_usd=baseline,
@@ -178,6 +179,21 @@ class DashboardDataTests(unittest.TestCase):
         self.assertAlmostEqual(summary["counterfactual_strong_cost_usd"], 0.00027)
         self.assertEqual(summary["p50_latency_ms"], 200)
         self.assertEqual(summary["p95_latency_ms"], 400)
+        self.assertAlmostEqual(summary["estimated_savings_usd"], 0.00018)
+        self.assertAlmostEqual(summary["savings_percentage"], 66.6666666667)
+
+    def test_summary_handles_empty_and_unavailable_usage_without_fake_savings(self):
+        empty = summarize_requests([], self.settings)
+        self.assertIsNone(empty["measured_api_cost_usd"])
+        self.assertEqual(empty["total_input_tokens"], 0)
+        self.assertIsNone(empty["savings_percentage"])
+        add_request(
+            self.settings, question="unknown", tier=1, score=3, latency=0,
+            cost=None, baseline=None,
+        )
+        summary = summarize_requests(load_request_history(self.settings), self.settings)
+        self.assertIsNone(summary["estimated_savings_usd"])
+        self.assertEqual(summary["unavailable_cost_requests"], 1)
 
     def test_remote_config_and_history_use_authenticated_backend_endpoints(self):
         config_response = Mock(status_code=200)
@@ -275,6 +291,49 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(format_cost(None), "Cost unavailable")
         self.assertIn("(estimated)", format_cost(0.0))
 
+    def test_format_cost_labels_each_cost_status_explicitly(self):
+        self.assertIn("(actual)", format_cost(0.1, "actual"))
+        self.assertIn("(estimated)", format_cost(0.1, "estimated"))
+        self.assertIn("(simulated)", format_cost(0.1, "simulated"))
+        self.assertIn("hardware/electricity unmeasured", format_cost(0.0, "local"))
+        self.assertEqual(format_cost(None, "unknown"), "Cost unavailable")
+        self.assertIn("(unknown)", format_cost(0.1, "unknown"))
+
+    def test_unavailable_cost_explanations_use_existing_status_metadata(self):
+        self.assertEqual(
+            unavailable_cost_explanation({
+                "cost_status": "unknown",
+                "input_tokens": None,
+                "output_tokens": None,
+            }),
+            "Request cost incomplete because an attempt's usage is unknown.",
+        )
+        self.assertEqual(
+            unavailable_cost_explanation({
+                "cost_status": "unavailable_usage",
+                "input_tokens": None,
+                "output_tokens": None,
+            }),
+            "Provider usage information unavailable.",
+        )
+        self.assertEqual(
+            unavailable_cost_explanation({
+                "cost_status": "unavailable_pricing",
+                "input_tokens": 10,
+                "output_tokens": 5,
+            }),
+            "Model pricing is not configured.",
+        )
+        self.assertEqual(
+            unavailable_cost_explanation({
+                "cost_status": "unavailable",
+                "input_tokens": None,
+                "output_tokens": None,
+                "token_source": "provider",
+            }),
+            "Provider usage information unavailable.",
+        )
+
     def test_filters_by_tier_fallback_override_and_text(self):
         add_request(
             self.settings,
@@ -353,7 +412,9 @@ class DashboardDataTests(unittest.TestCase):
         )
         self.assertIn("deterministic fake", result["answer"])
         self.assertEqual(result["model"], "qwen-local")
-        self.assertEqual(result["token_source"], "estimated")
+        self.assertEqual(result["token_source"], "provider")
+        self.assertEqual(result["cost_status"], "simulated")
+        self.assertIsNotNone(result["cost_usd"])
         self.assertTrue(result["overridden"])
         self.assertEqual(len(load_request_history(self.settings)), 1)
         post.assert_not_called()

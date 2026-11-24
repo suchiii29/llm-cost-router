@@ -36,6 +36,7 @@ LOG_FIELDS = [
 
 
 def estimate_tokens(text: str) -> int:
+    """Legacy display helper; estimates from text are never used for cost."""
     return max(1, len(text) // 4) if text else 0
 
 
@@ -48,39 +49,31 @@ def estimate_cost(model_id, question, answer, provider_usage=None):
     usage = provider_usage or {}
     input_tokens = usage.get("input_tokens")
     output_tokens = usage.get("output_tokens")
-    input_cost_tokens = (
-        input_tokens if input_tokens is not None else estimate_tokens(question)
-    )
-    output_cost_tokens = (
-        output_tokens if output_tokens is not None else estimate_tokens(answer)
-    )
     if tier_id is None:
         cost_usd = baseline_cost_usd = None
     else:
         estimate = estimate_request_cost(
-            settings, tier_id, input_cost_tokens, output_cost_tokens
+            settings, tier_id, input_tokens, output_tokens
         )
         cost_usd = estimate.cost_usd
         baseline_cost_usd = estimate.baseline_cost_usd
     token_source = (
         "provider-reported"
         if input_tokens is not None and output_tokens is not None
-        else "estimated (characters / 4)"
+        else "unavailable"
     )
     return {
         "provider_input_tokens": input_tokens,
         "provider_output_tokens": output_tokens,
-        "estimated_input_tokens": estimate_tokens(question),
-        "estimated_output_tokens": estimate_tokens(answer),
-        "cost_input_tokens": input_cost_tokens,
-        "cost_output_tokens": output_cost_tokens,
+        "estimated_input_tokens": None,
+        "estimated_output_tokens": None,
+        "cost_input_tokens": input_tokens,
+        "cost_output_tokens": output_tokens,
         "input_token_source": (
-            "provider-reported" if input_tokens is not None
-            else "estimated (characters / 4)"
+            "provider-reported" if input_tokens is not None else "unavailable"
         ),
         "output_token_source": (
-            "provider-reported" if output_tokens is not None
-            else "estimated (characters / 4)"
+            "provider-reported" if output_tokens is not None else "unavailable"
         ),
         "token_source": token_source,
         "estimated_cost_usd": cost_usd,
@@ -133,6 +126,14 @@ def track_question(
         question,
         result["answer"],
         result["provider_usage"],
+    )
+    cost["estimated_cost_usd"] = result.get("cost_usd")
+    cost["estimated_strong_baseline_usd"] = result.get("baseline_cost_usd")
+    cost["estimated_savings_usd"] = (
+        result["baseline_cost_usd"] - result["cost_usd"]
+        if result.get("baseline_cost_usd") is not None
+        and result.get("cost_usd") is not None
+        else None
     )
     settings = get_settings()
     log_data = {

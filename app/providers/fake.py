@@ -16,6 +16,6 @@ class FakeProvider:
             model_id=model_id,
             provider="fake",
             started_at=started_at,
-            input_tokens=None,
-            output_tokens=None,
+            input_tokens=7,
+            output_tokens=9,
         )

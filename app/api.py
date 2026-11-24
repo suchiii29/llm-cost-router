@@ -168,10 +168,15 @@ def route_api(body: RouteRequest, settings: Settings = Depends(get_settings)):
         "overridden": result["overridden"],
         "input_tokens": usage["input_tokens"],
         "output_tokens": usage["output_tokens"],
+        "total_tokens": usage.get("total_tokens"),
         "token_source": result["token_source"],
         "latency_ms": result["latency_ms"],
         "cost_usd": result["cost_usd"],
         "baseline_cost_usd": result["baseline_cost_usd"],
+        "cost_status": result.get("cost_status", "unavailable"),
+        "actual_model": result["model"],
+        "pricing_version": result.get("pricing_version"),
+        "api_attempts": result.get("api_attempts", []),
         "request_id": result["request_id"],
     }
 
@@ -206,6 +211,7 @@ def request_history(
                 "reasons": json.loads(record.reasons_json),
                 "routed_to": record.routed_to,
                 "model": record.model,
+                "actual_model": record.actual_model or (record.model if record.request_status != "failure" else None),
                 "tier_id": next(
                     (tier.id for tier in settings.tiers if tier.model_id == record.model),
                     None,
@@ -214,7 +220,7 @@ def request_history(
                     (tier.name for tier in settings.tiers if tier.model_id == record.model),
                     None,
                 ),
-                "provider": next(
+                "provider": record.provider or next(
                     (tier.provider for tier in settings.tiers if tier.model_id == record.model),
                     None,
                 ),
@@ -223,10 +229,18 @@ def request_history(
                 "overridden": record.overridden,
                 "input_tokens": record.input_tokens,
                 "output_tokens": record.output_tokens,
+                "total_tokens": record.total_tokens,
                 "token_source": record.token_source,
                 "latency_ms": record.latency_ms,
                 "cost_usd": record.cost_usd,
                 "baseline_cost_usd": record.baseline_cost_usd,
+                "input_cost_usd": record.input_cost_usd,
+                "output_cost_usd": record.output_cost_usd,
+                "cost_currency": record.cost_currency or "USD",
+                "pricing_version": record.pricing_version,
+                "cost_status": record.cost_status or ("legacy_estimate" if record.cost_usd is not None else "unavailable"),
+                "api_attempts": json.loads(record.attempts_json) if record.attempts_json else [],
+                "request_status": record.request_status or "success",
                 "cache_hit": record.cache_hit,
             }
             for record in records

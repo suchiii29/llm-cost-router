@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -15,7 +16,7 @@ from app.providers.fake import FakeProvider
 from app.providers.groq import GroqProvider
 from app.providers.ollama import OllamaProvider
 from app.routing.router import route_question
-from app.storage.db import RequestRecord, get_engine
+from app.storage.db import RequestRecord, get_engine, initialize_database
 
 
 def sample_settings() -> Settings:
@@ -113,15 +114,118 @@ class ProviderParsingTests(unittest.TestCase):
             provider.generate("q", "local")
         self.assertEqual(post.call_count, 1)
 
-    def test_fake_provider_is_deterministic_and_marks_estimated_tokens(self):
+    def test_fake_provider_is_deterministic_with_fixed_token_usage(self):
         provider = FakeProvider()
         first = provider.generate("question", "local")
         second = provider.generate("question", "local")
         self.assertEqual(first.answer, second.answer)
-        self.assertEqual(first.token_source, "estimated")
+        self.assertEqual(first.token_source, "provider")
+        self.assertEqual((first.input_tokens, first.output_tokens), (7, 9))
 
 
 class CostAndStorageTests(unittest.TestCase):
+    @patch("app.providers.groq.record_metrics")
+    @patch("app.providers.base.requests.post")
+    def test_missing_groq_usage_is_estimated_not_reported(self, post, _record):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "model": "openai/gpt-oss-20b",
+            "choices": [{"message": {"content": "estimated answer"}}],
+        }
+        post.return_value = response
+        result = GroqProvider("test-key", sleep=lambda _delay: None).generate(
+            "question words", "openai/gpt-oss-20b"
+        )
+        self.assertEqual(result.token_source, "estimated")
+        self.assertEqual(result.input_token_source, "estimated")
+        self.assertEqual(result.output_token_source, "estimated")
+        self.assertGreater(result.input_tokens, 0)
+        self.assertGreater(result.output_tokens, 0)
+
+    def test_tier_one_and_two_prices_and_zero_tokens(self):
+        settings = sample_settings()
+        settings.tiers[1] = settings.tier(1).model_copy(
+            update={"input_usd_per_million": 0.075, "output_usd_per_million": 0.30}
+        )
+        tier_one = estimate_request_cost(settings, 1, 1_000_000, 1_000_000)
+        tier_two = estimate_request_cost(settings, 2, 1_000_000, 1_000_000)
+        self.assertAlmostEqual(tier_one.cost_usd, 0.375)
+        self.assertAlmostEqual(tier_two.cost_usd, 5.0)
+        self.assertEqual(estimate_request_cost(settings, 1, 0, 0).cost_usd, 0.0)
+
+    def test_missing_usage_metadata_stays_unavailable(self):
+        settings = sample_settings()
+        self.assertIsNone(estimate_request_cost(settings, 2, None, 10).cost_usd)
+
+    def test_sqlite_migration_preserves_legacy_request_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "legacy.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute(
+                "CREATE TABLE requests (id INTEGER PRIMARY KEY, created_at DATETIME "
+                "NOT NULL, question_hash VARCHAR(64) NOT NULL, question_text TEXT, "
+                "score INTEGER NOT NULL, reasons_json TEXT NOT NULL, routed_to VARCHAR(32) "
+                "NOT NULL, model VARCHAR(255), fallback BOOLEAN NOT NULL, fallback_reason TEXT, "
+                "overridden BOOLEAN NOT NULL, input_tokens INTEGER, output_tokens INTEGER, "
+                "token_source VARCHAR(16) NOT NULL, latency_ms INTEGER, cost_usd FLOAT, "
+                "baseline_cost_usd FLOAT, cache_hit BOOLEAN NOT NULL)"
+            )
+            connection.execute(
+                "INSERT INTO requests (id, created_at, question_hash, score, reasons_json, "
+                "routed_to, model, fallback, overridden, token_source, cost_usd, "
+                "baseline_cost_usd, cache_hit) VALUES (1, '2025-01-01', 'hash', 1, '[]', "
+                "'local', 'old-model', 0, 0, 'estimated', 0.0, 0.1, 0)"
+            )
+            connection.commit()
+            connection.close()
+            settings = sample_settings().model_copy(update={"db_url": f"sqlite:///{db_path}"})
+            initialize_database(settings)
+            with Session(get_engine(settings.db_url)) as session:
+                row = session.get(RequestRecord, 1)
+                self.assertEqual(row.actual_model, "old-model")
+                self.assertEqual(row.cost_status, "legacy_estimate")
+                self.assertIsNone(row.total_tokens)
+
+    @patch("app.routing.router.ask_tier")
+    def test_unknown_fallback_attempt_keeps_cost_unavailable(self, ask):
+        settings = sample_settings().model_copy(update={"enabled_tiers": [1, 2]})
+        ask.side_effect = [
+            ProviderHTTPError("temporary", 503, True),
+            FakeProvider().generate("question", "small"),
+        ]
+        with patch("app.routing.router.log_request", return_value=1):
+            result = route_question(
+                "Please explain this complex comparison", force_model="strong",
+                settings=settings, display=False,
+            )
+        self.assertEqual(len(result["api_attempts"]), 2)
+        self.assertIsNone(result["cost_usd"])
+        self.assertEqual(result["cost_status"], "unknown")
+
+    @patch("app.routing.router.ask_tier")
+    def test_usage_from_fallback_attempts_is_priced_by_each_served_model(self, ask):
+        settings = sample_settings().model_copy(update={"enabled_tiers": [1, 2]})
+        settings.tiers[1] = settings.tier(1).model_copy(
+            update={"input_usd_per_million": 1, "output_usd_per_million": 2}
+        )
+        ask.side_effect = [
+            ProviderHTTPError(
+                "temporary", 503, True,
+                usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                model_id="large",
+            ),
+            FakeProvider().generate("question", "small"),
+        ]
+        with patch("app.routing.router.log_request", return_value=1):
+            result = route_question(
+                "Please explain this complex comparison", force_model="strong",
+                settings=settings, display=False,
+            )
+        self.assertEqual(result["model"], "small")
+        self.assertEqual(result["provider_usage"]["total_tokens"], 31)
+        self.assertAlmostEqual(result["cost_usd"], 0.000060)
+        self.assertAlmostEqual(result["baseline_cost_usd"], 0.000076)
+
     def test_cost_is_none_when_rates_are_unset(self):
         settings = sample_settings()
         estimate = estimate_request_cost(settings, 1, 20, 10)
@@ -168,6 +272,13 @@ class CostAndStorageTests(unittest.TestCase):
 
 
 class SettingsTests(unittest.TestCase):
+    def test_checked_in_groq_rates_are_configured_by_model(self):
+        settings = Settings(_env_file=None)
+        self.assertEqual(settings.tier(1).input_usd_per_million, 0.075)
+        self.assertEqual(settings.tier(1).output_usd_per_million, 0.30)
+        self.assertEqual(settings.tier(2).input_usd_per_million, 0.15)
+        self.assertEqual(settings.tier(2).output_usd_per_million, 0.60)
+
     @patch.dict("os.environ", {
         "DB_URL": "sqlite://", "PROVIDER_MODE": "fake",
         "ROUTER_ENABLED_TIERS": "1,2", "ROUTER_DEPLOYMENT_PROFILE": "cloud",

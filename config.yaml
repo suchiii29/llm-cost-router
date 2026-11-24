@@ -17,11 +17,11 @@ tiers:
     name: cheap
     provider: groq
     model_id: openai/gpt-oss-20b
-    input_usd_per_million:
-    output_usd_per_million:
+    input_usd_per_million: 0.075
+    output_usd_per_million: 0.30
   - id: 2
     name: strong
     provider: groq
     model_id: openai/gpt-oss-120b
-    input_usd_per_million:
-    output_usd_per_million:
+    input_usd_per_million: 0.15
+    output_usd_per_million: 0.60

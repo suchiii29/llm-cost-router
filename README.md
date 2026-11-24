@@ -12,17 +12,17 @@ For the full methodology and interpretation, see the [final project report](docs
 
 Calling a powerful language model for every question can spend more API quota and money than necessary. Many questions are simple enough for a local model, while questions needing several reasoning steps may benefit from a stronger hosted model. This project demonstrates a rule-based router that chooses among Ollama and two Groq tiers and records what happened.
 
-The project is an educational prototype, not a production routing service. It estimates cost from configured rates and token counts; it does not report Groq's billed amount.
+The project is an educational prototype, not a production routing service. It calculates API inference cost from provider-reported usage and configured rates. This is a rate-based calculation, not an invoice or provider billing export.
 
 ## Architecture and workflow
 
 1. `app/routing/complexity.py` scores the question using word count, keyword groups, phrases, math symbols, and number counts.
 2. `app/routing/policy.py` maps scores below the configured threshold (default 3) to local tier 0 and scores at or above it to strong tier 2.
-3. `app/routing/router.py` calls the selected provider and records the answer, route, fallback history, usage, latency, and estimated cost fields. Recoverable failures descend to cheaper tiers; non-recoverable errors stop.
+3. `app/routing/router.py` calls the selected provider and records the answer, route, each provider attempt, usage, latency, and calculated API cost. Recoverable failures descend to cheaper tiers; non-recoverable errors stop.
 4. `app/providers/` implements Ollama and Groq adapters. The API is in `app/api.py`, SQLite request storage is in `app/storage/`, and the Streamlit UI is in `streamlit_app.py`.
 5. Separate offline scripts build datasets and labels, train the research classifier, and evaluate the deterministic test pilot from saved cache records. They do not put the classifier in the live route path.
 
-The tiers are **local** (Ollama `qwen2.5:1.5b`), **cheap** (Groq `openai/gpt-oss-20b`), and **strong** (Groq `openai/gpt-oss-120b`). Automatic low-complexity routing selects local; high-complexity routing selects strong. Cheap is available by manual override and as a fallback from strong. On recoverable errors, strong can fall back to cheap and then local; cheap can fall back to local. Model IDs, Ollama URL, Groq credentials, and optional rates can be configured through environment variables. Local model cost is configured as zero; hosted cost remains unavailable without both input and output rates.
+The tiers are **local** (Ollama `qwen2.5:1.5b`), **cheap** (Groq `openai/gpt-oss-20b`), and **strong** (Groq `openai/gpt-oss-120b`). Automatic low-complexity routing selects local; high-complexity routing selects strong. Cheap is available by manual override and as a fallback from strong. On recoverable errors, strong can fall back to cheap and then local; cheap can fall back to local. Model IDs, Ollama URL, Groq credentials, and per-million-token rates can be configured through environment variables. Local API inference cost is recorded as $0; this excludes hardware, electricity, and total operating costs.
 
 ### Complexity score
 
@@ -57,7 +57,7 @@ open -e .env
 
 Put your Groq key in the local `.env` file as `GROQ_API_KEY=...`. Do not put a real key in `.env.example`, source files, benchmark outputs, screenshots, or Git. `.env` and other `.env.*` files are ignored by Git; `.env.example` is the safe blank template.
 
-Optional rate settings in `.env` are USD per million tokens:
+Configure each Groq rate in `.env` as USD per million tokens:
 
 ```text
 GROQ_CHEAP_INPUT_USD_PER_MILLION=
@@ -68,7 +68,9 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:1.5b
 ```
 
-Set both rates for a Groq model to enable its cost estimate. If either is unset, cost for that model is shown as unavailable; no default price is assumed. Blank model and Ollama URL values use the defaults listed above. Ollama must be running locally with the configured model available.
+The current [official Groq model pages](https://console.groq.com/docs/models) list GPT-OSS 20B at $0.075 input / $0.30 output and GPT-OSS 120B at $0.15 input / $0.60 output per million tokens (checked 2026-11-17). Confirm current rates and any account-specific pricing before configuring the backend. No runtime default is assumed: if either rate for a Groq model is unset, its API cost is unavailable. Ollama API inference cost is $0; hardware, electricity, and other local operating costs are outside this metric. Blank model and Ollama URL values use the defaults listed above. Ollama must be running locally with the configured model available.
+
+Groq `prompt_tokens` and `completion_tokens`, and Ollama `prompt_eval_count` and `eval_count`, are captured from provider responses. Missing metadata stays null; character-based token estimates are never used for cost tracking. Cost is calculated as `(input_tokens × input_rate + output_tokens × output_rate) / 1,000,000`, using decimal arithmetic before storing USD values. For fallback, the router retains each successful provider attempt and adds its cost. If an attempt fails without usage data, request cost is unavailable because total billable usage cannot be established. Pricing rates are stored with each request so later rate changes do not rewrite history. The SQLite schema is extended additively; older requests remain readable and are labeled as legacy estimates or unavailable.
 
 ## Run the application
 
@@ -99,7 +101,7 @@ streamlit run streamlit_app.py
 
 Opening or refreshing the dashboard reads request history from the SQLite `requests` table and makes no model or API calls. The Ask form sends one `POST /v1/route` to `API_URL` (default `http://localhost:8000`) using `ROUTER_API_KEY` in the `X-API-Key` header. In Docker Compose, the dashboard API URL defaults to `http://api:8000`.
 
-The dashboard shows tier shares, fallback and override counts, latency percentiles, estimated cost, and counterfactual strong-only cost. Requests can be filtered by tier, fallback, override, and stored question/model/reason text. Question text is only available if `LOG_PROMPTS=true`. A cost is labeled estimated; missing rates or token counts yield **Cost unavailable**. The **Replay mode** toggle runs the deterministic fake provider inside the dashboard process, writes the replay request to SQLite, and does not require Wi-Fi, an API key, or a model server. The regular Ask path uses the configured API and provider routing.
+The dashboard's Cost Analytics section shows calculated API cost, provider-reported token totals, average cost per request, cost by model and tier, and unavailable-cost request count. Requests include actual served model, token counts, request cost, and calculation status. Estimated API savings compares measured API spend with an **estimated always-strong baseline** using the same known token counts. It is a hypothetical token-based comparison, not a second API call or evidence that the strong model would produce the same answer or token usage. It excludes local hardware and electricity costs. Requests missing token metadata or pricing are excluded; they are never treated as free. The **Replay mode** toggle runs the deterministic fake provider with fixed token usage inside the dashboard process and makes no network calls. Replay costs are marked simulated and excluded from measured cost and savings totals.
 
 ## HTTP API
 
@@ -109,7 +111,7 @@ Install the pinned dependencies, set a non-empty `ROUTER_API_KEY` in `.env`, the
 uvicorn app.api:app --reload
 ```
 
-All routes except `/health` require the same key in the `X-API-Key` header. `POST /v1/route` accepts a question (1–4000 characters), an optional `force_model` (`local`, `cheap`, or `strong`), and an optional threshold. `GET /v1/requests` reads request history from SQLite; `GET /v1/config` returns configured tier models and token rates. A per-key in-memory limit defaults to 60 requests per minute and can be changed with `API_RATE_LIMIT_PER_MINUTE`. `/health` checks Ollama HTTP reachability and whether a Groq key is configured; it does not call a model.
+All routes except `/health` require the same key in the `X-API-Key` header. `POST /v1/route` accepts a question (1–4000 characters), an optional `force_model` (`local`, `cheap`, or `strong`), and an optional threshold. It returns actual model, usage, cost status, per-attempt usage and the stored pricing configuration. `GET /v1/requests` reads request history from SQLite; `GET /v1/config` returns configured tier models and token rates. A per-key in-memory limit defaults to 60 requests per minute and can be changed with `API_RATE_LIMIT_PER_MINUTE`. `/health` checks Ollama HTTP reachability and whether a Groq key is configured; it does not call a model.
 
 `ROUTER_ENABLED_TIERS` is a comma-separated list of tier IDs and defaults to `0,1,2` for local development. For a cloud service without access to local Ollama, set it to `1,2`; low-complexity Automatic requests then use Cheap, and Strong failures can fall back to Cheap. Set `ROUTER_DEPLOYMENT_PROFILE` to `local` or `cloud` for health diagnostics. The profile is informational; `ROUTER_ENABLED_TIERS` controls routing.
 
@@ -119,14 +121,16 @@ Copy `.env.example` to `.env` and fill in the credentials you intend to use, the
 
 ## Tests
 
-Unit tests mock API calls and do not consume Groq credits:
+Unit tests mock provider calls and do not consume Groq credits:
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m py_compile *.py tests/*.py
+.venv312/bin/ruff check .
+.venv312/bin/python -m compileall -q app scripts tests *.py
+git diff --check
 ```
 
-The tests cover tier routing, manual overrides, fallback order, Ollama response parsing, authentication failures, cost estimation, numeric checking, and incomplete cache pairs. Provider calls are mocked.
+The tests cover tier routing, manual overrides, fallback order, Ollama/Groq usage parsing, authentication failures, cost calculation, historical migration, API compatibility, Replay, dashboard summaries, numeric checking, and incomplete cache pairs. Provider calls are mocked.
 
 ## Dataset building and labelling
 
